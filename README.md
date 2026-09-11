@@ -1,6 +1,6 @@
 # Minimalist Ad Pre-flight MVP
 
-This first build contains only the application shell and deterministic review-gating behavior.
+This prototype currently contains product-page extraction and the deterministic review-gating foundation.
 
 ## Run locally
 
@@ -12,11 +12,16 @@ This first build contains only the application shell and deterministic review-ga
 
 Run `python -m unittest discover -s tests -v`.
 
-## Included in this step
+## Included
 
 - PASS, PASS with warnings, REVIEW, BLOCK, and Not Assessable findings
 - Deterministic overall-status calculation
 - Export eligibility derived from the overall status
 - Five sample situations for user-facing verification
+- Minimalist India product-URL validation and extraction
+- Product identity, facts, claims, evidence, commercial, and social-proof groups
+- Variant and product-image selection when the page is ambiguous
+- Source wording and capture time for extracted information
+- Grouped manual fallback for unreadable product pages
 
-Product extraction, evidence capture, generation, creative rendering, uploaded-image review, and real export are intentionally deferred.
+Ad generation, creative rendering, AI review, uploaded-creative review, and real export are intentionally deferred.
