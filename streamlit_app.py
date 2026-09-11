@@ -1,6 +1,12 @@
 import streamlit as st
 
 from minimalist_mvp.demo_scenarios import SCENARIOS
+from minimalist_mvp.eligibility import (
+    EligibilityAssessment,
+    EligibilityDecision,
+    EligibilityStatus,
+    assess_generation_eligibility,
+)
 from minimalist_mvp.product import (
     ExtractedItem,
     ProductExtraction,
@@ -101,6 +107,79 @@ def variant_label(variant: ProductVariant) -> str:
 
 def image_label(image: ProductImage) -> str:
     return image.label
+
+
+ELIGIBILITY_PRESENTATION = {
+    EligibilityStatus.ELIGIBLE: ("Eligible", "Exact sourced wording available to generation."),
+    EligibilityStatus.ELIGIBLE_REVIEW_REQUIRED: (
+        "Eligible but review required",
+        "Available only with the listed evidence and conditions preserved.",
+    ),
+    EligibilityStatus.INELIGIBLE: ("Ineligible", "Not available to generation."),
+    EligibilityStatus.NOT_ASSESSABLE: (
+        "Not Assessable",
+        "Not available unless the missing context or evidence is resolved.",
+    ),
+}
+
+
+def render_eligibility_source(decision: EligibilityDecision) -> None:
+    with st.expander("View source / evidence"):
+        if not decision.sources:
+            st.caption("No traceable source was available.")
+        for index, source in enumerate(decision.sources, 1):
+            if len(decision.sources) > 1:
+                st.markdown(f"**Source {index} · {source.section}**")
+            else:
+                st.markdown(f"**{source.section}**")
+            st.write(source.wording)
+            st.caption(
+                f"{source.source_url} · Captured {source.captured_at.isoformat()} · {source.method}"
+            )
+
+
+def render_eligibility_decision(decision: EligibilityDecision) -> None:
+    with st.container(border=True):
+        st.caption(decision.category)
+        st.markdown(f"**{decision.label}**")
+        st.write(decision.value)
+        st.markdown(f"**Why:** {decision.reason}")
+        if decision.required_conditions:
+            st.markdown("**Required evidence / qualifiers:**")
+            for condition in decision.required_conditions:
+                st.markdown(f"- {condition}")
+        render_eligibility_source(decision)
+
+
+def render_eligibility(assessment: EligibilityAssessment) -> None:
+    st.divider()
+    st.subheader("Generation eligibility")
+    st.write(
+        "This is the controlled set that a later generator may use. "
+        "It does not generate an ad or provide final policy approval."
+    )
+    columns = st.columns(4)
+    for column, status in zip(columns, EligibilityStatus):
+        label, _ = ELIGIBILITY_PRESENTATION[status]
+        column.metric(label, len(assessment.for_status(status)))
+
+    for status in EligibilityStatus:
+        label, explanation = ELIGIBILITY_PRESENTATION[status]
+        with st.expander(
+            f"{label} ({len(assessment.for_status(status))})",
+            expanded=status in {EligibilityStatus.ELIGIBLE_REVIEW_REQUIRED, EligibilityStatus.INELIGIBLE},
+        ):
+            st.caption(explanation)
+            decisions = assessment.for_status(status)
+            if not decisions:
+                st.caption("No items in this group.")
+            for decision in decisions:
+                render_eligibility_decision(decision)
+
+    st.info(
+        "Price, MRP, offers, ratings, and review counts remain reference-only and are excluded from generation eligibility.",
+        icon="ℹ️",
+    )
 
 
 def render_extraction(
@@ -239,7 +318,8 @@ def render_extraction(
         key=f"verified-{extraction.captured_at.isoformat()}",
     )
     if verified:
-        st.success("Extraction verified. No generation is performed in this build step.", icon="✅")
+        st.success("Extraction verified. Eligibility is shown below; no ad is generated.", icon="✅")
+        render_eligibility(assess_generation_eligibility(extraction, selected_variant))
     elif not (identity_ready and variant_ready):
         st.caption("Resolve the product identity choices above before verification.")
 

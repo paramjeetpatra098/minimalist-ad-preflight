@@ -1,6 +1,6 @@
 # Minimalist Ad Pre-flight MVP
 
-This prototype currently contains product-page extraction and the deterministic review-gating foundation.
+This prototype currently contains product-page extraction, generation eligibility, and the deterministic review-gating foundation.
 
 ## Run locally
 
@@ -23,5 +23,9 @@ Run `python -m unittest discover -s tests -v`.
 - Variant and product-image selection when the page is ambiguous
 - Source wording and capture time for extracted information
 - Grouped manual fallback for unreadable product pages
+- Deterministic pre-generation classification into Eligible, Eligible but review required,
+  Ineligible, and Not Assessable
+- Reasons, required qualifiers, and source/evidence provenance for every eligibility decision
+- Commercial information and social proof kept outside the generation-eligible set
 
 Ad generation, creative rendering, AI review, uploaded-creative review, and real export are intentionally deferred.
