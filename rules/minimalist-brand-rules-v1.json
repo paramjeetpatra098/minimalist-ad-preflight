@@ -1,0 +1,312 @@
+{
+  "rulebook": {
+    "name": "Minimalist Brand & Claims Rules",
+    "version": "1.0",
+    "market": "India",
+    "scope": "Static 1080×1080 Meta Feed creative assets for Minimalist India, including uploaded Minimalist creatives",
+    "purpose": "Pre-flight review of skincare ad creatives for claims risk, brand tone, brand language, and the narrow Meta-specific risks encoded here.",
+    "disclaimer": "This is a working standard derived from publicly available Minimalist material and India advertising guidance. It is not Minimalist's internal brand or legal policy. PASS does not constitute legal approval or guaranteed Meta approval.",
+    "core_principle": "Claim strength should not exceed the strength of the available supporting evidence.",
+    "examples_note": "Examples illustrate rule interpretation; they are not approved ad copy."
+  },
+  "source_catalog": {
+    "F1": "Minimalist About page",
+    "F2": "Minimalist Our Values page",
+    "F3": "Minimalist Salicylic Acid 2% Face Serum product page",
+    "F4": "Minimalist Light Fluid SPF 50 Sunscreen product page",
+    "C1": "Amazon India interview with Minimalist co-founder Mohit Yadav",
+    "C2": "YourStory profile of Minimalist",
+    "C3": "Moneycontrol interview with Minimalist co-founder Mohit Yadav",
+    "V1": "Reviewed Minimalist Instagram ad examples",
+    "V2": "Reviewed comparator beauty and wellness ad examples",
+    "R1": "Cosmetics Rules 2020",
+    "R2": "Consumer Protection Act 2019",
+    "R3": "CCPA Guidelines for Prevention of Misleading Advertisements 2022",
+    "R4": "ASCI Code for Self-Regulation of Advertising Content in India",
+    "M1": "Meta Advertising Standards, including Personal Attributes and Health and Wellness: https://transparency.meta.com/policies/ad-standards/"
+  },
+  "outcomes": {
+    "BLOCK": {
+      "meaning": "A known contradiction, invented benefit, material strengthening or omission, definite rule violation, or an exceptional claim lacking evidence for its exact promise.",
+      "exportable": false
+    },
+    "REVIEW": {
+      "meaning": "A material claim or check may be valid, but evidence, context, interpretation, or asset readability is incomplete. Escalation alone does not resolve it.",
+      "exportable": false
+    },
+    "WARN": {
+      "meaning": "A non-gating brand-quality finding severity, not a separate overall verdict.",
+      "exportable": true
+    },
+    "PASS_WITH_WARNINGS": {
+      "meaning": "No BLOCK or REVIEW remains, but one or more non-gating WARN findings remain.",
+      "exportable": true
+    },
+    "PASS": {
+      "meaning": "No unresolved issue was found within this encoded pre-flight scope and available evidence. This is not legal or Meta approval.",
+      "exportable": true
+    }
+  },
+  "assessment_policy": {
+    "rule_level_not_assessable": "NOT_ASSESSABLE is a rule-level status, never an overall verdict. State which required input or evidence is missing; do not silently mark the check clear.",
+    "material_not_assessable": "REVIEW",
+    "nonmaterial_not_assessable": "WARN",
+    "overall_precedence": ["BLOCK", "REVIEW", "PASS_WITH_WARNINGS", "PASS"],
+    "review_resolution": "A REVIEW remains unresolved until evidence-backed approval, approved wording, or removal/rewrite resolves the issue; escalation alone does not clear it.",
+    "duplicate_findings": "Report a single underlying missing-qualifier issue even when CLAIM-009 and LANG-004 both describe it.",
+    "product_provenance": "For every product fact or claim used, retain exact source wording or value, source URL, capture time, and the product/variant it applies to. A product-page statement proves what the page said, not necessarily that the claim has paid-ad substantiation.",
+    "dynamic_information": "Price, MRP, offers, ratings, and review counts are reference-only for generation. If present in an uploaded or later edited ad, verify the exact product/variant, source, value, capture time, and current validity. Missing or stale/unverifiable validity is REVIEW; a known wrong or expired representation is BLOCK.",
+    "rendered_asset": "Apply factual, qualifier, and Meta-specific checks to the visible final creative, including embedded text and imagery. If material content cannot be read confidently, mark that check NOT_ASSESSABLE and return REVIEW overall."
+  },
+  "rules": [
+    {
+      "id": "CLAIM-001",
+      "category": "policy_claims",
+      "title": "Product facts must match source",
+      "rule": "Ingredient, concentration, SPF, formulation, variant, and other product facts used in the creative must match traceable source wording for the exact product/variant. Known wrong or misleading facts are violations; missing context is not proof of an error.",
+      "rationale": "Minimalist's positioning relies heavily on transparency and precise product information. Wrong ingredient, concentration, SPF, or formulation data is a direct trust failure.",
+      "source_refs": ["F1", "F2", "F3", "F4", "R1"],
+      "on_violation": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["2% Salicylic Acid, when that is the exact sourced product specification"], "flag": ["An ingredient, concentration, or SPF that conflicts with the selected product source"]}
+    },
+    {
+      "id": "CLAIM-002",
+      "category": "policy_claims",
+      "title": "Do not invent product benefits",
+      "rule": "Do not introduce a benefit that is absent from the generation-eligible evidence or known to be unsupported for the selected product. For an external creative without enough product/evidence context, mark the benefit NOT_ASSESSABLE rather than calling it invented.",
+      "rationale": "The model should not use general skincare knowledge as evidence for a specific product. Benefits should come from the supplied product source.",
+      "source_refs": ["F1", "F3", "F4", "R1", "R4"],
+      "on_violation": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A benefit that is linked to the selected product's eligible evidence"], "flag": ["A benefit created from general ingredient knowledge but absent from the selected product evidence"]}
+    },
+    {
+      "id": "CLAIM-003",
+      "category": "policy_claims",
+      "title": "Claim strength must not exceed evidence strength",
+      "rule": "The ad must not turn a sourced statement into a materially stronger promise. Missing substantiation for a potentially valid claim is NOT_ASSESSABLE, not a known violation; a known mismatch between the ad and evidence is BLOCK.",
+      "rationale": "Minimalist does use strong and quantified claims, but the wording should not become stronger than the evidence supporting it.",
+      "source_refs": ["F3", "F4", "R1", "R2", "R3", "R4"],
+      "on_violation": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A documented result with its scope and qualifiers preserved"], "flag": ["Changing a qualified benefit into a guaranteed result"]}
+    },
+    {
+      "id": "CLAIM-004",
+      "category": "policy_claims",
+      "title": "Absolute or guaranteed outcomes require exceptional evidence",
+      "rule": "An absolute, guaranteed, permanent, or complete-result promise must have evidence for that exact promise. If the promise is legible and exact evidence is absent, BLOCK. Evidence for a weaker or conditional claim does not suffice. If the asset wording itself cannot be interpreted, mark NOT_ASSESSABLE.",
+      "rationale": "Terms such as 'guaranteed', '100%', 'permanent', or 'completely eliminates' create very strong expectations and are risky without evidence supporting that exact promise.",
+      "source_refs": ["R1", "R2", "R3", "R4"],
+      "on_violation": "BLOCK",
+      "on_missing_exact_evidence": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": [], "flag": ["Guaranteed to eliminate acne in four weeks"]}
+    },
+    {
+      "id": "CLAIM-005",
+      "category": "policy_claims",
+      "title": "Clinical/scientific proof claims require substantiation",
+      "rule": "Use 'clinically proven' or equivalent scientific-proof wording only when traceable evidence supports that exact characterization and its material context. A product-page assertion alone is not proof of the underlying study. Missing substantiation is NOT_ASSESSABLE; a known false characterization is BLOCK.",
+      "rationale": "Phrases such as 'clinically proven' imply a specific level of evidence. They should only be used when the available source supports that characterization.",
+      "source_refs": ["F3", "F4", "R3", "R4"],
+      "on_violation": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A testing description that matches the available study and preserves its relevant scope"], "flag": ["Clinically proven to eliminate acne in seven days, without supporting clinical evidence"]}
+    },
+    {
+      "id": "CLAIM-006",
+      "category": "policy_claims",
+      "title": "Quantified efficacy claims require evidence and qualifiers",
+      "rule": "Percentages, multiples, and time-bound efficacy results need traceable evidence for the exact number, measured outcome, and material qualifiers such as basis, duration, and population. Missing substantiation is NOT_ASSESSABLE; a known wrong number or materially overstated result is BLOCK.",
+      "rationale": "Percentages, multiples, and time-bound results appear objective and measurable. They need traceable evidence and relevant context such as study duration or subject population.",
+      "source_refs": ["F3", "F4", "R3", "R4"],
+      "on_violation": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A documented result stated with its tested population and timeframe"], "flag": ["A study percentage presented as a universal result"]}
+    },
+    {
+      "id": "CLAIM-007",
+      "category": "policy_claims",
+      "title": "Ranking and superiority claims require evidence",
+      "rule": "Claims such as '#1', 'best', or 'most recommended' require substantiation for the exact comparison, market, basis, and relevant period. Missing substantiation is NOT_ASSESSABLE; a known false comparison is BLOCK.",
+      "rationale": "Claims such as '#1', 'best', or 'most recommended' compare the product against alternatives and therefore require appropriate substantiation.",
+      "source_refs": ["R2", "R3", "R4"],
+      "on_violation": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A precisely scoped ranking supported by matching comparison evidence"], "flag": ["#1 serum without a supported comparison basis"]}
+    },
+    {
+      "id": "CLAIM-008",
+      "category": "policy_claims",
+      "title": "Avoid unsupported treatment or cure language",
+      "rule": "Do not convert a cosmetic benefit into a promise to treat, prevent, or cure a medical condition. A legible cure-like or definite treatment promise without evidence for that exact promise is BLOCK; exact evidence does not by itself settle regulatory interpretation. Ambiguous wording or unreadable content is NOT_ASSESSABLE.",
+      "rationale": "Cosmetic benefit language can become materially different when converted into claims about treating, preventing, or curing a medical condition.",
+      "source_refs": ["R1", "R2", "R3", "R4"],
+      "on_violation": "BLOCK",
+      "on_missing_exact_evidence": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A sourced cosmetic benefit that does not promise medical treatment"], "flag": ["Cures acne"]}
+    },
+    {
+      "id": "CLAIM-009",
+      "category": "policy_claims",
+      "title": "Material qualifiers must not be removed",
+      "rule": "Do not remove or make unreadable a qualifier whose absence materially changes a claim's meaning, including population, duration, testing method, or degree of certainty. Evaluate the visible final asset. Report the same underlying issue only once if LANG-004 also applies.",
+      "rationale": "Removing context such as 'of subjects', 'after 4 weeks', or the testing method can materially change what an evidence-backed statement means.",
+      "source_refs": ["F3", "F4", "R2", "R3", "R4"],
+      "on_violation": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A study result retaining 'of subjects' and 'after 4 weeks' when those are material"], "flag": ["A study result stripped of its tested population or timeframe"]}
+    },
+    {
+      "id": "TONE-001",
+      "category": "brand_tone",
+      "title": "Science-led but consumer-friendly",
+      "rule": "Use clear, understandable science and ingredient language without turning the ad into academic prose.",
+      "rationale": "Minimalist communicates science and ingredients clearly, but its consumer communication is not written like an academic paper.",
+      "source_refs": ["F1", "F2", "F3", "F4", "C1", "V1"],
+      "on_violation": "WARN",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": false,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A specific active or product fact explained in consumer-friendly language"], "flag": ["Dense, unexplained technical prose as the whole ad message"]}
+    },
+    {
+      "id": "TONE-002",
+      "category": "brand_tone",
+      "title": "Avoid fear, shame, and insecurity framing",
+      "rule": "Address product concerns without using fear, shame, or insecurity as the selling frame. This brand-tone rule remains WARN-only; a definite Meta personal-attribute or negative-self-perception issue is evaluated separately under META-001.",
+      "rationale": "Minimalist explicitly positions itself against fear-mongering and misleading category communication. Product problems should be addressed without exploiting insecurity.",
+      "source_refs": ["F1", "F2", "C1", "C2", "C3", "V1"],
+      "on_violation": "WARN",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": false,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A neutral description of a skincare concern"], "flag": ["Destroy your ugly acne and get flawless skin NOW!"]}
+    },
+    {
+      "id": "TONE-003",
+      "category": "brand_tone",
+      "title": "Avoid vague hyperbole",
+      "rule": "Prefer a specific, product-led reason to consider the product over vague beauty hyperbole. Treat a merely generic tone as WARN; separately assess any factual promise under claim rules.",
+      "rationale": "Generic beauty terms such as 'miracle', 'flawless', or 'perfect skin' replace the specific, product-led reasoning that is characteristic of Minimalist.",
+      "source_refs": ["F1", "F2", "F3", "F4", "V1"],
+      "on_violation": "WARN",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": false,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A product-led description using a sourced ingredient or benefit"], "flag": ["A magical serum for perfect skin"]}
+    },
+    {
+      "id": "TONE-004",
+      "category": "brand_tone",
+      "title": "Promotional messaging is allowed",
+      "rule": "Offers, launches, and purchase CTAs can coexist with Minimalist's science-led communication. Promotion alone is not off-brand. This is guidance only and never emits a PASS finding or overrides another rule.",
+      "rationale": "The paid-ad examples show that offers, launches, and purchase CTAs can coexist with Minimalist's science-led communication. Promotion alone is not off-brand.",
+      "source_refs": ["V1", "F3", "F4"],
+      "on_violation": null,
+      "on_uncertain": null,
+      "hard_gate": false,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A purchase CTA alongside accurate product information"], "flag": []}
+    },
+    {
+      "id": "LANG-001",
+      "category": "brand_language",
+      "title": "Prefer specific product language",
+      "rule": "Prefer exact actives, concentrations, concerns, and sourced benefits to generic beauty terminology when they are relevant and accurate.",
+      "rationale": "Minimalist frequently communicates through exact actives, concentrations, concerns, and benefits instead of generic beauty terminology.",
+      "source_refs": ["F1", "F2", "F3", "F4", "V1"],
+      "on_violation": "WARN",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": false,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["2% Salicylic Acid, when exact and relevant to the selected product"], "flag": ["A generic 'magical serum' description without a concrete product reason"]}
+    },
+    {
+      "id": "LANG-002",
+      "category": "brand_language",
+      "title": "Preserve ingredient and concentration meaning",
+      "rule": "Keep ingredient and concentration information accurate. A changed value, ingredient, or misleading paraphrase is BLOCK under CLAIM-001. If the meaning stays correct but wording merely loses useful specificity, issue a non-gating WARN.",
+      "rationale": "Ingredient specificity is central to the brand's transparency. Replacing precise information with vague language reduces accuracy; changing the value creates a factual error.",
+      "source_refs": ["F1", "F2", "F3", "F4", "R1"],
+      "on_violation": "WARN",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": false,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["An accurate but less specific description of a sourced ingredient"], "flag": ["Changing a sourced ingredient or concentration value"]}
+    },
+    {
+      "id": "LANG-003",
+      "category": "brand_language",
+      "title": "Connect the benefit clearly to the product",
+      "rule": "Keep the product and a concrete, sourced product/benefit message central instead of relying only on lifestyle aspiration.",
+      "rationale": "The reviewed ads keep the product and a concrete product/benefit message central rather than relying only on lifestyle aspiration.",
+      "source_refs": ["V1", "F3", "F4"],
+      "on_violation": "WARN",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": false,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A visible product with a sourced reason to consider it"], "flag": ["Lifestyle aspiration with no identifiable product benefit"]}
+    },
+    {
+      "id": "LANG-004",
+      "category": "brand_language",
+      "title": "Preserve evidence qualifiers",
+      "rule": "Preserve words such as study duration, subjects, testing method, or 'independently tested' when they affect interpretation. A material omission is BLOCK under CLAIM-009 and must not create a duplicate finding; a merely stylistic loss of detail is WARN.",
+      "rationale": "Terms such as study duration, subjects, testing method, or 'independently tested' provide important context and should remain when they affect interpretation of the claim.",
+      "source_refs": ["F3", "F4", "R3", "R4"],
+      "on_violation": "WARN",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": false,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A study claim with its material duration and subject qualifier retained"], "flag": ["Dropping 'after 4 weeks' when that changes the result's meaning"]}
+    },
+    {
+      "id": "SYSTEM-001",
+      "category": "system",
+      "title": "If evidence cannot be verified, escalate rather than guess",
+      "rule": "When evidence, product context, provenance, freshness, or readable creative content needed for a material check is unavailable, mark that rule NOT_ASSESSABLE and make the overall result REVIEW. Do not infer a contradiction, invent support, or silently PASS. A known contradiction is handled by the relevant BLOCK rule.",
+      "rationale": "The scorer should distinguish between 'this is wrong' and 'I do not have enough evidence to know.' Uncertainty should trigger human review rather than a confident PASS.",
+      "source_refs": ["R1", "R2", "R3", "R4"],
+      "on_violation": "REVIEW",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["External ad with an unverifiable material claim receives NOT_ASSESSABLE for the rule and REVIEW overall"], "flag": ["Passing an external ad because its product evidence was not supplied"]}
+    },
+    {
+      "id": "META-001",
+      "category": "meta_policy",
+      "title": "Avoid implied viewer attributes and appearance-based negative self-perception",
+      "rule": "In the visible static Meta Feed creative, do not assert or imply that the viewer has a personal health or appearance attribute, or use copy or imagery that attempts to generate negative self-perception about appearance to sell the product. Neutral descriptions of a product or skin concern are not violations by themselves. Do not infer a blanket ban on before-and-after imagery from this rule.",
+      "rationale": "Meta's advertising guidance identifies personal-attribute implications and negative self-perception in health and beauty advertising as distinct policy risks. This narrow platform gate cannot be represented by the WARN-only brand-tone rule.",
+      "source_refs": ["M1"],
+      "on_violation": "BLOCK",
+      "on_uncertain": "NOT_ASSESSABLE",
+      "hard_gate": true,
+      "applies_to": ["generator", "scorer"],
+      "examples": {"acceptable": ["A neutral statement about a product for acne-prone skin"], "flag": ["A direct assertion about the viewer's acne paired with appearance shaming"]}
+    }
+  ]
+}
