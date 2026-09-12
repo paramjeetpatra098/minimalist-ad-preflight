@@ -14,6 +14,7 @@ from minimalist_mvp.eligibility import (
     assess_generation_eligibility,
 )
 from minimalist_mvp.generation import (
+    AdDraft,
     CitedAdElement,
     GeneratedCreative,
     GenerationContext,
@@ -21,6 +22,10 @@ from minimalist_mvp.generation import (
     generate_ad_content,
     load_product_image,
     render_creative_preview,
+)
+from minimalist_mvp.fix import (
+    FixUnavailable, creative_copy, generated_draft_with_fix, replace_flagged,
+    revise_external, revise_generated, suggest_replacement,
 )
 from minimalist_mvp.product import (
     ExtractedItem,
@@ -346,6 +351,79 @@ def render_scorer_report(report: ScorerReport, export_data: bytes | None = None,
         st.error("Export locked. Resolve the REVIEW or BLOCK issue and re-review.")
 
 
+def render_generated_fix_loop(creative: GeneratedCreative, report: ScorerReport) -> None:
+    if report.export_allowed:
+        return
+    st.subheader("Fix & re-review")
+    st.caption("Only editable copy can be changed here. Every change re-renders the creative and runs the full review.")
+    editable = creative_copy(creative.draft)
+    for index, finding in enumerate(report.findings):
+        if finding.status not in {FindingOutcome.BLOCK, FindingOutcome.REVIEW, FindingOutcome.NOT_ASSESSABLE}:
+            continue
+        if finding.flagged_element not in editable:
+            st.info(f"{finding.rule_id}: {finding.suggested_fix} This element is not editable copy. Upload a revised creative in the external-review tab, or resolve the evidence gap.")
+            continue
+        if st.button(f"Apply suggested fix · {finding.rule_id}", key=f"generated_fix_{index}"):
+            try:
+                client = OpenAI(api_key=configured_openai_api_key(), timeout=60, max_retries=0)
+                replacement, evidence_id = suggest_replacement(
+                    client, finding, editable, generated_context(creative), configured_openai_model(),
+                )
+                draft = generated_draft_with_fix(creative.draft, finding.flagged_element,
+                                                 replacement, evidence_id)
+                product_image = load_product_image(creative.product_image_reference,
+                                                   st.session_state.get("manual_product_image"))
+                updated, preview, new_report = revise_generated(
+                    client, creative, draft, product_image, model=configured_openai_model(),
+                )
+            except (FixUnavailable, GenerationUnavailable) as exc:
+                st.error(str(exc))
+            except OpenAIError as exc:
+                log_generation_api_error(exc, configured_openai_api_key(), "fix/re-review")
+                st.error("The correction could not be completed. Please try again.")
+            else:
+                st.session_state.generated_creative = updated.model_dump(mode="json")
+                st.session_state.generated_preview = preview
+                st.session_state.generated_review = new_report.model_dump(mode="json")
+                st.rerun()
+    revision_key = hashlib.sha256(editable.encode("utf-8")).hexdigest()[:12]
+    with st.form(f"generated_manual_fix_{revision_key}"):
+        st.markdown("**Edit copy manually**")
+        headline = st.text_input("Headline", value=creative.draft.headline.text)
+        supporting = st.text_area("Supporting copy", value=creative.draft.supporting_copy.text)
+        callout = st.text_input("Ingredient / concentration callout",
+                                value=creative.draft.ingredient_callout.text if creative.draft.ingredient_callout else "")
+        cta = st.text_input("CTA", value=creative.draft.cta.text)
+        submitted = st.form_submit_button("Save edits & re-review")
+    if submitted:
+        try:
+            payload = creative.draft.model_dump()
+            payload["headline"]["text"] = headline
+            payload["supporting_copy"]["text"] = supporting
+            if callout and payload["ingredient_callout"] is None:
+                raise FixUnavailable("A new callout needs cited eligible evidence; edit an existing callout instead.")
+            payload["ingredient_callout"] = ({**payload["ingredient_callout"], "text": callout}
+                                             if callout and payload["ingredient_callout"] else None)
+            payload["cta"]["text"] = cta
+            draft = AdDraft.model_validate(payload)
+            product_image = load_product_image(creative.product_image_reference,
+                                               st.session_state.get("manual_product_image"))
+            client = OpenAI(api_key=configured_openai_api_key(), timeout=60, max_retries=0)
+            updated, preview, new_report = revise_generated(
+                client, creative, draft, product_image, model=configured_openai_model(),
+            )
+        except (FixUnavailable, GenerationUnavailable, ValueError) as exc:
+            st.error(f"The edit could not be used safely: {exc}")
+        except OpenAIError as exc:
+            log_generation_api_error(exc, configured_openai_api_key(), "manual re-review")
+            st.error("The correction could not be completed. Please try again.")
+        else:
+            st.session_state.generated_creative = updated.model_dump(mode="json")
+            st.session_state.generated_preview = preview
+            st.session_state.generated_review = new_report.model_dump(mode="json")
+            st.rerun()
+
+
 def render_generation(
     assessment: EligibilityAssessment,
     image_reference: str,
@@ -416,7 +494,9 @@ def render_generation(
             render_generated_creative(GeneratedCreative.model_validate(stored_creative), stored_preview)
             stored_report = st.session_state.get("generated_review")
             if stored_report:
-                render_scorer_report(ScorerReport.model_validate(stored_report), stored_preview)
+                report = ScorerReport.model_validate(stored_report)
+                render_scorer_report(report, stored_preview)
+                render_generated_fix_loop(GeneratedCreative.model_validate(stored_creative), report)
         else:
             st.info("The inputs changed. Generate again to see a creative for the current selections.")
 
@@ -757,10 +837,70 @@ def render_external_review() -> None:
         else:
             st.session_state.external_review = report.model_dump(mode="json")
             st.session_state.external_review_signature = signature
+            st.session_state.external_reviewed_copy = ad_copy
+            st.session_state.external_review_context = context.model_dump(mode="json")
+            st.session_state.external_reference_image = reference_image
     if st.session_state.get("external_review") and st.session_state.get("external_review_signature") == signature:
         report = ScorerReport.model_validate(st.session_state.external_review)
-        render_scorer_report(report, image_bytes or ad_copy.encode("utf-8"),
+        reviewed_copy = st.session_state.get("external_reviewed_copy", ad_copy)
+        if reviewed_copy != ad_copy:
+            st.markdown("**Current re-reviewed pasted copy**")
+            st.code(reviewed_copy, language=None)
+            st.caption("The input box above still contains the original paste. Click Review creative to start over from it.")
+        render_scorer_report(report, image_bytes or reviewed_copy.encode("utf-8"),
                              uploaded.name if uploaded else "creative.txt")
+        if not report.export_allowed:
+            st.subheader("Fix & re-review")
+            st.caption("Pasted copy can be corrected here. Text embedded in an uploaded image cannot be edited here.")
+            context = ReviewContext.model_validate(st.session_state.get("external_review_context", {}))
+            for index, finding in enumerate(report.findings):
+                if finding.status not in {FindingOutcome.BLOCK, FindingOutcome.REVIEW, FindingOutcome.NOT_ASSESSABLE}:
+                    continue
+                if not reviewed_copy or finding.flagged_element not in reviewed_copy:
+                    st.info(f"{finding.rule_id}: {finding.suggested_fix} Upload a revised image and click Review creative; the current image has not been changed.")
+                    continue
+                if st.button(f"Apply suggested fix · {finding.rule_id}", key=f"external_fix_{index}"):
+                    try:
+                        client = OpenAI(api_key=api_key, timeout=60, max_retries=0)
+                        replacement, _ = suggest_replacement(client, finding, reviewed_copy,
+                                                             context, configured_openai_model())
+                        revised_copy = replace_flagged(reviewed_copy, finding.flagged_element, replacement)
+                        new_report = revise_external(
+                            client, revised_copy, image_bytes, context,
+                            reference_image_bytes=st.session_state.get("external_reference_image"),
+                            model=configured_openai_model(),
+                        )
+                    except (FixUnavailable, ValueError) as exc:
+                        st.error(str(exc))
+                    except OpenAIError as exc:
+                        log_generation_api_error(exc, api_key, "external fix/re-review")
+                        st.error("The correction could not be completed. Please try again.")
+                    else:
+                        st.session_state.external_reviewed_copy = revised_copy
+                        st.session_state.external_review = new_report.model_dump(mode="json")
+                        st.rerun()
+            if reviewed_copy:
+                revision_key = hashlib.sha256(reviewed_copy.encode("utf-8")).hexdigest()[:12]
+                with st.form(f"external_manual_fix_{revision_key}"):
+                    revised_copy = st.text_area("Edit pasted ad copy manually", value=reviewed_copy)
+                    submitted = st.form_submit_button("Save edits & re-review")
+                if submitted:
+                    try:
+                        client = OpenAI(api_key=api_key, timeout=60, max_retries=0)
+                        new_report = revise_external(
+                            client, revised_copy, image_bytes, context,
+                            reference_image_bytes=st.session_state.get("external_reference_image"),
+                            model=configured_openai_model(),
+                        )
+                    except FixUnavailable as exc:
+                        st.error(str(exc))
+                    except OpenAIError as exc:
+                        log_generation_api_error(exc, api_key, "external manual re-review")
+                        st.error("The correction could not be completed. Please try again.")
+                    else:
+                        st.session_state.external_reviewed_copy = revised_copy
+                        st.session_state.external_review = new_report.model_dump(mode="json")
+                        st.rerun()
 
 
 st.title("Minimalist Ad Pre-flight")

@@ -10,6 +10,7 @@ from streamlit.testing.v1 import AppTest
 
 from minimalist_mvp.product import manual_product_extraction
 from tests.test_generation import FakeClient, valid_draft
+from tests.test_fix import ReviewResponses
 
 
 class PassingReviewClient(FakeClient):
@@ -132,6 +133,33 @@ class ServerSideSecretTests(unittest.TestCase):
         self.assertFalse(self.app.session_state.external_review["export_allowed"])
         self.assertFalse(any(widget.label == "Export creative"
                              for widget in self.app.download_button))
+
+    def test_external_copy_fix_rechecks_and_unlocks_export(self) -> None:
+        self.app.secrets["OPENAI_API_KEY"] = "unit-test-server-key"
+        responses = ReviewResponses("")
+        with patch("openai.OpenAI", return_value=SimpleNamespace(responses=responses)):
+            self.app.run(timeout=20)
+            next(widget for widget in self.app.text_area
+                 if widget.label == "Ad copy (optional if an image is uploaded)").input(
+                     "Test Serum. Guaranteed to cure acne. Shop now."
+                 ).run(timeout=20)
+            next(widget for widget in self.app.checkbox
+                 if widget.label.startswith("Use the verified product information")).check().run(timeout=20)
+            next(widget for widget in self.app.button
+                 if widget.label == "Review creative").click().run(timeout=20)
+            self.assertFalse(self.app.exception)
+            self.assertEqual(self.app.session_state.external_review["overall"], "BLOCK")
+            self.assertFalse(any(widget.label == "Export creative"
+                                 for widget in self.app.download_button))
+            next(widget for widget in self.app.button
+                 if widget.label.startswith("Apply suggested fix")).click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.app.session_state.external_review["overall"], "PASS")
+        self.assertTrue(self.app.session_state.external_review["export_allowed"])
+        self.assertNotIn("Guaranteed", self.app.session_state.external_reviewed_copy)
+        self.assertGreaterEqual(len(responses.review_calls), 2)
+        self.assertTrue(any(widget.label == "Export creative"
+                            for widget in self.app.download_button))
 
 
 if __name__ == "__main__":
