@@ -1,41 +1,28 @@
 # Minimalist Ad Pre-flight MVP
 
-This prototype currently contains product-page extraction, generation eligibility, and the deterministic review-gating foundation.
+A Streamlit prototype for Minimalist India static Meta Feed ads. It has two paths:
+
+- **Create & Review:** read and confirm a product page, classify evidence for generation, create one 1080×1080 ad using the selected product image, run pre-flight review, fix issues, and export an eligible creative.
+- **Review Existing Ad:** upload an image, paste copy, or both; optionally add product evidence; review and revise. Copy-only review does not perform visual checks and does not export a creative asset.
+
+The pre-flight result is PASS, PASS with warnings, REVIEW, or BLOCK within the rulebook's scope and available evidence. It is not legal approval or guaranteed Meta approval. REVIEW and BLOCK are non-exportable.
 
 ## Run locally
 
-1. Create and activate a Python virtual environment.
-2. Install `requirements.txt`.
-3. Add your server-side key to `.streamlit/secrets.toml`:
-   ```toml
-   OPENAI_API_KEY = "your-real-api-key"
-   ```
-   Keep this file private; it is ignored by Git. Restart Streamlit after creating or changing it.
-4. Run `streamlit run streamlit_app.py`.
+Use Python 3.12. Install `requirements.txt`, then add the server-side key to `.streamlit/secrets.toml`:
+
+```toml
+OPENAI_API_KEY = "your-key-here"
+```
+
+This file is ignored by Git. Do not put a real key in `.streamlit/secrets.toml.example` or `.env.example`. Start the app with `streamlit run streamlit_app.py`.
+
+## Deploy on Streamlit Community Cloud
+
+Push this repository to GitHub without rewriting its history. In Streamlit Community Cloud, create an app from the GitHub repository using branch `main` and entrypoint `streamlit_app.py`. Choose Python 3.12 in Advanced settings and add `OPENAI_API_KEY` in the cloud Secrets field using the TOML format above. Never upload or commit the local `.streamlit/secrets.toml` file.
+
+The public app uses the server-side API key for generation and review, so monitor API usage and set an appropriate project budget. Product-page access can vary from the cloud environment; the app includes a manual product-information fallback.
 
 ## Test
 
-Run `python -m unittest discover -s tests -v`.
-
-## Included
-
-- PASS, PASS with warnings, REVIEW, BLOCK, and Not Assessable findings
-- Deterministic overall-status calculation
-- Export eligibility derived from the overall status
-- Five sample situations for user-facing verification
-- Minimalist India product-URL validation and extraction
-- Direct and collection-scoped Minimalist product URLs, with scheme-less www links normalized to HTTPS
-- Product identity, facts, claims, evidence, commercial, and social-proof groups
-- Variant and product-image selection when the page is ambiguous
-- Source wording and capture time for extracted information
-- Grouped manual fallback for unreadable product pages
-- Deterministic pre-generation classification into Eligible, Eligible but review required,
-  Ineligible, and Not Assessable
-- Reasons, required qualifiers, and source/evidence provenance for every eligibility decision
-- Commercial information and social proof kept outside the generation-eligible set
-- One evidence-bounded ad content plan with citations for every factual element
-- One in-memory 1080×1080 preview using the selected real product image
-- Deterministic rejection of unknown evidence IDs, invented numbers, unsupported wording,
-  or dropped required qualifiers
-
-Final creative review, correction, uploaded-creative review, and export are intentionally deferred.
+Run `python -m unittest discover -s tests -q` for the automated suite. The frozen rulebook is in `rules/` and the scorer's golden cases and image fixtures are in `evals/`.
