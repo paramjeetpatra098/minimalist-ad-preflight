@@ -1,4 +1,8 @@
+import hashlib
+import os
+
 import streamlit as st
+from openai import OpenAI, OpenAIError
 
 from minimalist_mvp.demo_scenarios import SCENARIOS
 from minimalist_mvp.eligibility import (
@@ -6,6 +10,15 @@ from minimalist_mvp.eligibility import (
     EligibilityDecision,
     EligibilityStatus,
     assess_generation_eligibility,
+)
+from minimalist_mvp.generation import (
+    CitedAdElement,
+    GeneratedCreative,
+    GenerationContext,
+    GenerationUnavailable,
+    generate_ad_content,
+    load_product_image,
+    render_creative_preview,
 )
 from minimalist_mvp.product import (
     ExtractedItem,
@@ -156,7 +169,7 @@ def render_eligibility(assessment: EligibilityAssessment) -> None:
     st.subheader("Generation eligibility")
     st.write(
         "This is the controlled set that a later generator may use. "
-        "It does not generate an ad or provide final policy approval."
+        "It does not provide final policy or legal approval."
     )
     columns = st.columns(4)
     for column, status in zip(columns, EligibilityStatus):
@@ -180,6 +193,158 @@ def render_eligibility(assessment: EligibilityAssessment) -> None:
         "Price, MRP, offers, ratings, and review counts remain reference-only and are excluded from generation eligibility.",
         icon="ℹ️",
     )
+
+
+def configured_openai_api_key() -> str:
+    try:
+        return str(st.secrets.get("OPENAI_API_KEY", "")).strip()
+    except (FileNotFoundError, KeyError):
+        return ""
+
+
+def configured_openai_model() -> str:
+    environment_model = os.getenv("OPENAI_MODEL", "").strip()
+    if environment_model:
+        return environment_model
+    try:
+        secret_model = str(st.secrets.get("OPENAI_MODEL", "")).strip()
+    except (FileNotFoundError, KeyError):
+        secret_model = ""
+    return secret_model or "gpt-5-mini"
+
+
+def generation_signature(
+    assessment: EligibilityAssessment,
+    image_reference: str,
+    objective: str,
+    audience: str,
+) -> str:
+    value = "|".join(
+        (
+            assessment.model_dump_json(),
+            image_reference,
+            objective.strip(),
+            audience.strip(),
+        )
+    )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def render_cited_element(
+    title: str,
+    element: CitedAdElement | None,
+    creative: GeneratedCreative,
+) -> None:
+    st.markdown(f"**{title}**")
+    if element is None:
+        st.caption("Not used because no concise eligible ingredient or concentration was needed.")
+        return
+    st.write(element.text)
+    if element.evidence_ids:
+        st.caption(f"Evidence: {', '.join(element.evidence_ids)}")
+    else:
+        st.caption("Neutral CTA · no factual evidence required")
+
+
+def render_generated_creative(creative: GeneratedCreative, preview: bytes) -> None:
+    st.success("One evidence-bounded creative generated. Final review is not included yet.", icon="✅")
+    preview_column, content_column = st.columns([1.1, 1])
+    with preview_column:
+        st.image(preview, caption="1080×1080 creative preview", width="stretch")
+    with content_column:
+        st.subheader("Generated ad content")
+        render_cited_element("Headline", creative.draft.headline, creative)
+        render_cited_element("Supporting copy", creative.draft.supporting_copy, creative)
+        render_cited_element("Ingredient / concentration callout", creative.draft.ingredient_callout, creative)
+        render_cited_element("CTA", creative.draft.cta, creative)
+        st.markdown("**Product image reference**")
+        st.write(creative.product_image_reference)
+        st.caption(creative.product_image_evidence_id)
+
+    used_ids = {
+        evidence_id
+        for element in (
+            creative.draft.headline,
+            creative.draft.supporting_copy,
+            creative.draft.ingredient_callout,
+        )
+        if element is not None
+        for evidence_id in element.evidence_ids
+    }
+    with st.expander("Evidence used by this creative", expanded=True):
+        for entry in creative.evidence:
+            if entry.evidence_id not in used_ids:
+                continue
+            with st.container(border=True):
+                st.markdown(f"**{entry.evidence_id} · {entry.label}**")
+                st.write(entry.exact_text)
+                st.caption(entry.eligibility.value.replace("_", " ").title())
+                if entry.required_conditions:
+                    st.markdown("Required conditions:")
+                    for condition in entry.required_conditions:
+                        st.markdown(f"- {condition}")
+                for source in entry.sources:
+                    st.caption(
+                        f"{source.section} · {source.source_url} · "
+                        f"captured {source.captured_at.isoformat()}"
+                    )
+
+
+def render_generation(
+    assessment: EligibilityAssessment,
+    image_reference: str,
+    manual_image: bytes | None,
+) -> None:
+    st.divider()
+    st.subheader("Generate one Meta Feed creative")
+    st.write(
+        "Optional context can shape emphasis, but it cannot add product facts. "
+        "Only the eligible evidence shown above is sent to the generator."
+    )
+    objective = st.selectbox(
+        "Campaign objective (optional)",
+        ("", "Awareness", "Consideration", "Conversion"),
+        format_func=lambda value: value or "Default — present the product clearly",
+    )
+    audience = st.text_area(
+        "Audience context (optional)",
+        placeholder="For example: people building a simple evening skincare routine",
+        max_chars=300,
+    )
+
+    api_key = configured_openai_api_key()
+    if not api_key:
+        st.error("OpenAI API key is not configured on the server.")
+
+    signature = generation_signature(assessment, image_reference, objective, audience)
+    if st.button("Generate one creative", type="primary", disabled=not bool(api_key)):
+        try:
+            with st.spinner("Creating one evidence-bounded ad…"):
+                product_image = load_product_image(image_reference, manual_image)
+                creative = generate_ad_content(
+                    OpenAI(api_key=api_key),
+                    assessment,
+                    image_reference,
+                    GenerationContext(objective=objective, audience=audience),
+                    model=configured_openai_model(),
+                )
+                preview = render_creative_preview(creative, product_image)
+        except GenerationUnavailable as exc:
+            st.error(str(exc))
+        except OpenAIError:
+            st.error("The generation request could not be completed. Check the server configuration and try again.")
+        else:
+            st.session_state.generated_creative = creative.model_dump(mode="json")
+            st.session_state.generated_preview = preview
+            st.session_state.generation_signature = signature
+
+    stored_creative = st.session_state.get("generated_creative")
+    stored_preview = st.session_state.get("generated_preview")
+    if stored_creative and stored_preview:
+        if st.session_state.get("generation_signature") == signature:
+            render_generated_creative(GeneratedCreative.model_validate(stored_creative), stored_preview)
+        else:
+            st.info("The inputs changed. Generate again to see a creative for the current selections.")
 
 
 def render_extraction(
@@ -318,8 +483,16 @@ def render_extraction(
         key=f"verified-{extraction.captured_at.isoformat()}",
     )
     if verified:
-        st.success("Extraction verified. Eligibility is shown below; no ad is generated.", icon="✅")
-        render_eligibility(assess_generation_eligibility(extraction, selected_variant))
+        st.success("Extraction verified. Eligibility and generation controls are shown below.", icon="✅")
+        assessment = assess_generation_eligibility(extraction, selected_variant)
+        render_eligibility(assessment)
+        image_reference = (
+            extraction.manual_image_name
+            if manual_image
+            else selected_image.url if selected_image else ""
+        )
+        if image_reference:
+            render_generation(assessment, image_reference, manual_image)
     elif not (identity_ready and variant_ready):
         st.caption("Resolve the product identity choices above before verification.")
 
@@ -363,6 +536,8 @@ def render_manual_fallback(source_url: str) -> None:
             st.session_state.product_extraction = extraction
             st.session_state.manual_product_image = product_image.getvalue() if product_image else None
             st.session_state.product_read_error = None
+            st.session_state.generated_creative = None
+            st.session_state.generated_preview = None
             st.rerun()
 
 
@@ -371,11 +546,14 @@ def render_product_flow() -> None:
     st.write("Enter a Minimalist India product page. Nothing extracted will be used until you verify it.")
     source_url = st.text_input(
         "Minimalist product URL",
-        placeholder="https://beminimalist.co/products/...",
+        placeholder="https://beminimalist.co/products/... or /collections/.../products/...",
+        help="Direct and collection-scoped product links are accepted; www links may omit https://.",
     )
     if st.button("Extract product information", type="primary"):
         st.session_state.product_extraction = None
         st.session_state.manual_product_image = None
+        st.session_state.generated_creative = None
+        st.session_state.generated_preview = None
         try:
             with st.spinner("Reading the product page…"):
                 st.session_state.product_extraction = read_product_url(source_url)

@@ -52,11 +52,43 @@ class ProductUrlTests(unittest.TestCase):
         url = "https://beminimalist.co/products/test-serum?variant=1"
         self.assertEqual(validate_product_url(url), url)
 
+    def test_accepts_collection_scoped_product_urls(self) -> None:
+        urls = (
+            "https://beminimalist.co/collections/skin/products/salicylic-lha-2-cleanser",
+            "https://beminimalist.co/collections/bath-body/products/nonapeptide-aha-06-underarm-roll-on",
+            "https://beminimalist.co/collections/vitamin-c/products/vitamin-c-ethyl-ascorbic-acid-10-acetyl-glucosamine-1",
+        )
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertEqual(validate_product_url(url), url)
+
+    def test_accepts_www_product_url_without_scheme(self) -> None:
+        self.assertEqual(
+            validate_product_url("www.beminimalist.co/products/salicylic-acid-2"),
+            "https://www.beminimalist.co/products/salicylic-acid-2",
+        )
+        self.assertEqual(
+            validate_product_url(
+                "www.beminimalist.co/products/vitamin-c-ethyl-ascorbic-acid-10-acetyl-glucosamine-1"
+            ),
+            "https://www.beminimalist.co/products/vitamin-c-ethyl-ascorbic-acid-10-acetyl-glucosamine-1",
+        )
+        self.assertEqual(
+            validate_product_url("http://www.beminimalist.co/products/salicylic-acid-2"),
+            "http://www.beminimalist.co/products/salicylic-acid-2",
+        )
+
     def test_rejects_non_product_or_non_india_url(self) -> None:
         with self.assertRaises(ProductReadError):
             validate_product_url("https://global.beminimalist.co/products/test-serum")
         with self.assertRaises(ProductReadError):
             validate_product_url("https://beminimalist.co/collections/serums")
+        with self.assertRaises(ProductReadError):
+            validate_product_url("https://beminimalist.co/collections/skin/products/")
+        with self.assertRaises(ProductReadError):
+            validate_product_url("https://beminimalist.co/collections/skin/products/test/extra")
+        with self.assertRaises(ProductReadError):
+            validate_product_url("www.beminimalist.co.evil.example/products/test")
 
 
 class ProductExtractionTests(unittest.TestCase):

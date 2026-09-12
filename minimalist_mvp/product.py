@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 ALLOWED_HOSTS = {"beminimalist.co", "www.beminimalist.co"}
 MAX_PAGE_BYTES = 4_000_000
+PRODUCT_PATH = re.compile(r"^/(?:products/[^/]+|collections/[^/]+/products/[^/]+)/?$")
 
 
 class ProductReadError(Exception):
@@ -74,11 +75,20 @@ def validate_product_url(raw_url: str) -> str:
     if not url:
         raise ProductReadError("Enter a Minimalist product URL.")
 
-    parsed = urlsplit(url)
-    host = (parsed.hostname or "").lower().rstrip(".")
+    if "://" not in url and not url.startswith("//"):
+        url = f"https://{url}"
+
+    try:
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        port = parsed.port
+    except ValueError as exc:
+        raise ProductReadError("Use a valid Minimalist product URL.") from exc
     if parsed.scheme not in {"http", "https"} or host not in ALLOWED_HOSTS:
         raise ProductReadError("Use a product URL from beminimalist.co for the India market.")
-    if not parsed.path.startswith("/products/"):
+    if parsed.username or parsed.password or port is not None:
+        raise ProductReadError("Use a standard Minimalist product URL without credentials or a custom port.")
+    if not PRODUCT_PATH.fullmatch(parsed.path):
         raise ProductReadError("The URL must point to a specific Minimalist product page.")
     return url
 
