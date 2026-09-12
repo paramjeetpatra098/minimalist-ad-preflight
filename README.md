@@ -34,6 +34,12 @@ streamlit run streamlit_app.py
 
 Run `python -m unittest discover -s tests -q`. The versioned rulebook is in `rules/`; scorer golden cases and image fixtures are in `evals/`. Human-readable snapshots of the app's active prompts are in `prompts/`. The Python code remains the runtime source of truth.
 
+## Product decisions
+
+- [Decision note](docs/decision-note.md)
+- [Failure modes](docs/failure-modes.md)
+- [Minimalist research & brand rules](docs/minimalist-research-and-brand-rules.pdf)
+
 ## Scope and limits
 
 - Minimalist India, one static 1080×1080 Meta Feed creative. No direct Meta publishing, login, campaign history, or analytics.
