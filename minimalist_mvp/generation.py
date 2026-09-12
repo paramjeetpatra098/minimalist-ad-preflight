@@ -20,10 +20,15 @@ from minimalist_mvp.product import SourceReference
 MAX_PRODUCT_IMAGE_BYTES = 10_000_000
 MAX_PRODUCT_IMAGE_PIXELS = 25_000_000
 DEFAULT_MODEL = "gpt-5-mini"
+UNRELIABLE_CREATIVE_MESSAGE = "Couldn’t generate a reliable creative. Please try again."
 
 
 class GenerationUnavailable(Exception):
     """Raised when safe generation cannot produce a usable result."""
+
+
+class UnsupportedWordingError(GenerationUnavailable):
+    """The model supplied words outside the cited evidence and neutral vocabulary."""
 
 
 class CitedAdElement(BaseModel):
@@ -153,29 +158,53 @@ def generate_ad_content(
         "every required condition verbatim in the visible copy. Use a neutral CTA such as Shop now, "
         "Learn more, Discover more, or Explore. CTA evidence_ids must be empty. If a concise "
         "ingredient or concentration exists, use it for ingredient_callout; otherwise return null. "
-        "Outside exact evidence wording, use only the permitted neutral connector words. Keep the "
+        "Outside exact evidence wording, use only the permitted neutral connector words. "
+        "Use complete words from the evidence, never clipped, split, misspelled, or invented "
+        "fragments. If a sourced phrase will not fit, choose a shorter complete sourced phrase; "
+        "do not shorten individual words. Keep the "
         "headline to 80 characters, supporting copy to 200, and callout to 70. Audience and "
         "objective are creative context only and may not become product facts."
     )
 
-    response = client.responses.parse(
-        model=model,
-        input=[
-            {"role": "developer", "content": instructions},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-        text_format=AdDraft,
+    retry_instruction = (
+        "The previous draft contained unsupported or incomplete wording. Regenerate the entire "
+        "draft from the allowed evidence; do not reuse or edit the failed draft. Use only intact "
+        "source words and the permitted neutral connector words."
     )
-    draft = response.output_parsed
-    if draft is None:
-        raise GenerationUnavailable("The model did not return a usable structured ad draft.")
-    validate_ad_draft(draft, evidence)
-    return GeneratedCreative(
-        draft=draft,
-        evidence=evidence,
-        product_image_reference=product_image_reference,
-        model=model,
-    )
+    for attempt in range(2):
+        response = client.responses.parse(
+            model=model,
+            input=[
+                {
+                    "role": "developer",
+                    "content": instructions + (" " + retry_instruction if attempt else ""),
+                },
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            text_format=AdDraft,
+        )
+        draft = getattr(response, "output_parsed", None)
+        if getattr(response, "status", None) == "incomplete" or draft is None:
+            if attempt == 0:
+                continue
+            raise GenerationUnavailable(UNRELIABLE_CREATIVE_MESSAGE)
+        try:
+            validate_ad_draft(draft, evidence)
+        except UnsupportedWordingError:
+            if attempt == 0:
+                continue
+            raise GenerationUnavailable(UNRELIABLE_CREATIVE_MESSAGE) from None
+        except GenerationUnavailable:
+            if attempt == 1:
+                raise GenerationUnavailable(UNRELIABLE_CREATIVE_MESSAGE) from None
+            raise
+        return GeneratedCreative(
+            draft=draft,
+            evidence=evidence,
+            product_image_reference=product_image_reference,
+            model=model,
+        )
+    raise GenerationUnavailable(UNRELIABLE_CREATIVE_MESSAGE)
 
 
 def validate_ad_draft(draft: AdDraft, evidence: list[EvidenceEntry]) -> None:
@@ -276,7 +305,7 @@ def _validate_grounding(
     allowed_tokens = _meaningful_tokens(cited_text) | _GENERIC_CREATIVE_TOKENS
     unsupported = _meaningful_tokens(element.text) - allowed_tokens
     if unsupported:
-        raise GenerationUnavailable(
+        raise UnsupportedWordingError(
             f"The generated {element_name} introduced unsupported wording: "
             f"{', '.join(sorted(unsupported))}."
         )

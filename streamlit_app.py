@@ -1,5 +1,7 @@
 import hashlib
+import logging
 import os
+import re
 
 import streamlit as st
 from openai import OpenAI, OpenAIError
@@ -31,6 +33,14 @@ from minimalist_mvp.product import (
     variant_commercial_items,
 )
 from minimalist_mvp.review import FindingOutcome, OverallStatus, decide_review
+from minimalist_mvp.scorer import (
+    ReviewContext,
+    ScorerReport,
+    dimension_status,
+    extracted_context,
+    generated_context,
+    score_creative,
+)
 
 
 st.set_page_config(
@@ -50,13 +60,14 @@ st.markdown(
         padding: 1rem 1.2rem;
         margin: 0.75rem 0 1.25rem;
         background: #ffffff;
+        color: #1f2937;
     }
-    .status-pass { border-left-color: #157f3b; }
-    .status-warn { border-left-color: #bf7300; }
-    .status-review { border-left-color: #b45f06; }
-    .status-block { border-left-color: #b42318; }
-    .status-label { font-size: 1.45rem; font-weight: 750; margin-bottom: 0.2rem; }
-    .eyebrow { color: #5d6673; font-size: 0.82rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .status-pass { border-left-color: #157f3b; background: #effaf2; color: #16472b; }
+    .status-warn { border-left-color: #986000; background: #fff7e6; color: #613e00; }
+    .status-review { border-left-color: #a45605; background: #fff2e5; color: #633407; }
+    .status-block { border-left-color: #b42318; background: #fff0ee; color: #681e18; }
+    .status-label { color: inherit; font-size: 1.45rem; font-weight: 750; margin-bottom: 0.2rem; }
+    .status-card .eyebrow { color: inherit; opacity: 0.82; font-size: 0.82rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
     .workflow { color: #4d5662; font-size: 0.95rem; margin-bottom: 1.4rem; }
     .reference-note { color: #5d6673; font-size: 0.9rem; margin-top: -0.5rem; margin-bottom: 1rem; }
     </style>
@@ -213,6 +224,16 @@ def configured_openai_model() -> str:
     return secret_model or "gpt-5-mini"
 
 
+def log_generation_api_error(exc: OpenAIError, api_key: str, stage: str) -> None:
+    """Keep useful local diagnostics without logging credentials or request payloads."""
+    message = str(exc).replace(api_key, "[REDACTED]") if api_key else str(exc)
+    message = re.sub(r"(?i)\bsk-[a-z0-9_-]+\b", "[REDACTED]", message)
+    message = re.sub(r"(?i)\bbearer\s+\S+", "Bearer [REDACTED]", message)
+    logging.getLogger("minimalist_mvp.generation").error(
+        "OpenAI %s failed: %s: %s", stage, type(exc).__name__, message[:1000]
+    )
+
+
 def generation_signature(
     assessment: EligibilityAssessment,
     image_reference: str,
@@ -247,7 +268,7 @@ def render_cited_element(
 
 
 def render_generated_creative(creative: GeneratedCreative, preview: bytes) -> None:
-    st.success("One evidence-bounded creative generated. Final review is not included yet.", icon="✅")
+    st.success("One evidence-bounded creative generated and sent for pre-flight review.", icon="✅")
     preview_column, content_column = st.columns([1.1, 1])
     with preview_column:
         st.image(preview, caption="1080×1080 creative preview", width="stretch")
@@ -290,6 +311,41 @@ def render_generated_creative(creative: GeneratedCreative, preview: bytes) -> No
                     )
 
 
+def render_scorer_report(report: ScorerReport, export_data: bytes | None = None,
+                         export_name: str = "creative.png") -> None:
+    label, css_class, gate_message = STATUS_PRESENTATION[report.overall]
+    st.markdown(
+        f'<div class="status-card {css_class}"><div class="eyebrow">Pre-flight result</div>'
+        f'<div class="status-label">{label}</div><div>{gate_message}</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("Pre-flight only within the encoded rulebook and available evidence; not legal or Meta approval.")
+    for area in ("Policy & Claims", "Brand Tone", "Brand Language"):
+        st.subheader(f"{area} — {dimension_status(report.findings, area)}")
+        area_findings = [finding for finding in report.findings if finding.area == area]
+        if not area_findings:
+            st.caption("No issue identified in this area within the assessable scope.")
+        for finding in area_findings:
+            with st.container(border=True):
+                st.markdown(f"**{finding_label(finding.status)} · {finding.rule_id}**")
+                st.write(f"Flagged: {finding.flagged_element}")
+                st.write(f"Why: {finding.reason}")
+                for source in finding.evidence:
+                    st.caption(f"Evidence: {source}")
+                st.write(f"Suggested fix: {finding.suggested_fix}")
+    if report.export_allowed:
+        st.success("Export allowed for this pre-flight result.")
+        if export_data is not None:
+            mime = ("text/plain" if export_name.endswith(".txt") else
+                    "image/webp" if export_name.lower().endswith(".webp") else
+                    "image/jpeg" if export_name.lower().endswith((".jpg", ".jpeg")) else
+                    "image/png")
+            st.download_button("Export creative", export_data, file_name=export_name,
+                               mime=mime)
+    else:
+        st.error("Export locked. Resolve the REVIEW or BLOCK issue and re-review.")
+
+
 def render_generation(
     assessment: EligibilityAssessment,
     image_reference: str,
@@ -318,24 +374,39 @@ def render_generation(
 
     signature = generation_signature(assessment, image_reference, objective, audience)
     if st.button("Generate one creative", type="primary", disabled=not bool(api_key)):
+        api_stage = "generation"
         try:
             with st.spinner("Creating one evidence-bounded ad…"):
                 product_image = load_product_image(image_reference, manual_image)
+                client = OpenAI(api_key=api_key, timeout=60, max_retries=0)
                 creative = generate_ad_content(
-                    OpenAI(api_key=api_key),
+                    client,
                     assessment,
                     image_reference,
                     GenerationContext(objective=objective, audience=audience),
                     model=configured_openai_model(),
                 )
                 preview = render_creative_preview(creative, product_image)
+                api_stage = "review"
+                report = score_creative(
+                    client, ad_copy="\n".join(
+                        element.text for element in (
+                            creative.draft.headline, creative.draft.supporting_copy,
+                            creative.draft.ingredient_callout, creative.draft.cta,
+                        ) if element is not None
+                    ), image_bytes=preview, reference_image_bytes=product_image,
+                    context=generated_context(creative),
+                    model=configured_openai_model(),
+                )
         except GenerationUnavailable as exc:
             st.error(str(exc))
-        except OpenAIError:
+        except OpenAIError as exc:
+            log_generation_api_error(exc, api_key, api_stage)
             st.error("The generation request could not be completed. Check the server configuration and try again.")
         else:
             st.session_state.generated_creative = creative.model_dump(mode="json")
             st.session_state.generated_preview = preview
+            st.session_state.generated_review = report.model_dump(mode="json")
             st.session_state.generation_signature = signature
 
     stored_creative = st.session_state.get("generated_creative")
@@ -343,6 +414,9 @@ def render_generation(
     if stored_creative and stored_preview:
         if st.session_state.get("generation_signature") == signature:
             render_generated_creative(GeneratedCreative.model_validate(stored_creative), stored_preview)
+            stored_report = st.session_state.get("generated_review")
+            if stored_report:
+                render_scorer_report(ScorerReport.model_validate(stored_report), stored_preview)
         else:
             st.info("The inputs changed. Generate again to see a creative for the current selections.")
 
@@ -491,10 +565,17 @@ def render_extraction(
             if manual_image
             else selected_image.url if selected_image else ""
         )
+        review_context = extracted_context(
+            extraction, selected_variant.title if selected_variant else "",
+        )
+        review_context.product_image_reference = image_reference
+        st.session_state.verified_review_context = review_context.model_dump(mode="json")
         if image_reference:
             render_generation(assessment, image_reference, manual_image)
-    elif not (identity_ready and variant_ready):
-        st.caption("Resolve the product identity choices above before verification.")
+    else:
+        st.session_state.verified_review_context = None
+        if not (identity_ready and variant_ready):
+            st.caption("Resolve the product identity choices above before verification.")
 
 
 def render_manual_fallback(source_url: str) -> None:
@@ -538,6 +619,8 @@ def render_manual_fallback(source_url: str) -> None:
             st.session_state.product_read_error = None
             st.session_state.generated_creative = None
             st.session_state.generated_preview = None
+            st.session_state.generated_review = None
+            st.session_state.verified_review_context = None
             st.rerun()
 
 
@@ -554,6 +637,8 @@ def render_product_flow() -> None:
         st.session_state.manual_product_image = None
         st.session_state.generated_creative = None
         st.session_state.generated_preview = None
+        st.session_state.generated_review = None
+        st.session_state.verified_review_context = None
         try:
             with st.spinner("Reading the product page…"):
                 st.session_state.product_extraction = read_product_url(source_url)
@@ -622,6 +707,62 @@ def render_review_demo() -> None:
             st.error("Locked", icon="🔒")
 
 
+def render_external_review() -> None:
+    st.markdown("### Review a Minimalist India creative")
+    st.write("Upload the final image, paste ad copy, or provide both. Product evidence is optional; "
+             "material checks without it stay in REVIEW when they cannot be assessed.")
+    uploaded = st.file_uploader("Creative image", type=["png", "jpg", "jpeg", "webp"],
+                                key="external_creative_image")
+    ad_copy = st.text_area("Ad copy (optional if an image is uploaded)", key="external_ad_copy")
+    context_option = st.checkbox("Use the verified product information from the Product tab",
+                                 disabled=not bool(st.session_state.get("verified_review_context")))
+    source_text = st.text_area(
+        "Additional exact product/evidence wording (optional)",
+        help="Paste source wording only. An unsourced assertion is not independent substantiation.",
+    )
+    source_url = st.text_input("Source URL for additional wording (optional)")
+    image_bytes = uploaded.getvalue() if uploaded else None
+    if image_bytes:
+        st.image(image_bytes, caption="Uploaded final creative", width=360)
+    api_key = configured_openai_api_key()
+    if not api_key:
+        st.error("OpenAI API key is not configured on the server.")
+    signature = hashlib.sha256(
+        (ad_copy + source_text + source_url + str(context_option)).encode() + (image_bytes or b"")
+    ).hexdigest()
+    if st.button("Review creative", type="primary", disabled=not bool(api_key) or not bool(ad_copy.strip() or image_bytes)):
+        context = (ReviewContext.model_validate(st.session_state.verified_review_context)
+                   if context_option else ReviewContext())
+        reference_image = None
+        if context_option and context.product_image_reference and image_bytes:
+            try:
+                reference_image = load_product_image(
+                    context.product_image_reference, st.session_state.get("manual_product_image")
+                )
+            except GenerationUnavailable:
+                context.review_notes += " Selected pack image could not be read; pack comparison is not assessable."
+        if source_text.strip():
+            from minimalist_mvp.scorer import ReviewEvidence
+            context.evidence.append(ReviewEvidence(
+                evidence_id="USER-001", exact_text=source_text.strip(), source_url=source_url.strip(),
+            ))
+        try:
+            with st.spinner("Reviewing the final creative…"):
+                report = score_creative(OpenAI(api_key=api_key, timeout=60, max_retries=0), ad_copy=ad_copy,
+                                        image_bytes=image_bytes, reference_image_bytes=reference_image,
+                                        context=context,
+                                        model=configured_openai_model())
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.external_review = report.model_dump(mode="json")
+            st.session_state.external_review_signature = signature
+    if st.session_state.get("external_review") and st.session_state.get("external_review_signature") == signature:
+        report = ScorerReport.model_validate(st.session_state.external_review)
+        render_scorer_report(report, image_bytes or ad_copy.encode("utf-8"),
+                             uploaded.name if uploaded else "creative.txt")
+
+
 st.title("Minimalist Ad Pre-flight")
 st.markdown(
     '<div class="workflow">Product &nbsp;→&nbsp; Evidence &nbsp;→&nbsp; Creative '
@@ -629,9 +770,13 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-product_tab, review_tab = st.tabs(["Product extraction", "Review status examples"])
+product_tab, external_tab, review_tab = st.tabs(
+    ["Product extraction", "Review external creative", "Review status examples"]
+)
 with product_tab:
     render_product_flow()
+with external_tab:
+    render_external_review()
 with review_tab:
     render_review_demo()
 

@@ -74,17 +74,20 @@ def valid_draft() -> AdDraft:
 
 
 class FakeResponses:
-    def __init__(self, draft: AdDraft) -> None:
-        self.draft = draft
+    def __init__(self, draft: AdDraft | list[AdDraft | None]) -> None:
+        self.drafts = draft if isinstance(draft, list) else [draft]
         self.kwargs = None
+        self.calls = 0
 
     def parse(self, **kwargs):
         self.kwargs = kwargs
-        return SimpleNamespace(output_parsed=self.draft)
+        draft = self.drafts[min(self.calls, len(self.drafts) - 1)]
+        self.calls += 1
+        return SimpleNamespace(status="completed", output_parsed=draft)
 
 
 class FakeClient:
-    def __init__(self, draft: AdDraft) -> None:
+    def __init__(self, draft: AdDraft | list[AdDraft | None]) -> None:
         self.responses = FakeResponses(draft)
 
 
@@ -122,6 +125,32 @@ class GenerationTests(unittest.TestCase):
         draft.supporting_copy.text = "99% active helps reduce excess oil"
         with self.assertRaises(GenerationUnavailable):
             generate_ad_content(FakeClient(draft), assessment(), "product.png")
+
+    def test_malformed_partial_tokens_trigger_one_fresh_draft(self) -> None:
+        malformed = valid_draft()
+        malformed.supporting_copy.text = "2% active helps reduce excess oil aplica, o."
+        client = FakeClient([malformed, valid_draft()])
+
+        result = generate_ad_content(client, assessment(), "product.png")
+
+        self.assertEqual(client.responses.calls, 2)
+        self.assertEqual(result.draft.supporting_copy.text, "2% active helps reduce excess oil")
+        self.assertEqual(malformed.supporting_copy.text, "2% active helps reduce excess oil aplica, o.")
+        self.assertIn("Regenerate the entire draft", client.responses.kwargs["input"][0]["content"])
+
+    def test_stray_word_still_fails_after_single_retry(self) -> None:
+        malformed = valid_draft()
+        malformed.supporting_copy.text = "2% active helps reduce excess oil fun"
+        client = FakeClient([malformed, malformed])
+
+        with self.assertRaisesRegex(
+            GenerationUnavailable,
+            "Couldn’t generate a reliable creative. Please try again.",
+        ):
+            generate_ad_content(client, assessment(), "product.png")
+
+        self.assertEqual(client.responses.calls, 2)
+        self.assertEqual(malformed.supporting_copy.text, "2% active helps reduce excess oil fun")
 
     def test_copy_that_will_not_fit_is_rejected(self) -> None:
         schema = AdDraft.model_json_schema()
