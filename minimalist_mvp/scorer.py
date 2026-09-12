@@ -178,6 +178,16 @@ def _fallback(reason: str) -> ScorerReport:
     return _report([finding], "", "UNREADABLE")
 
 
+def has_meaningful_creative(ad_copy: str, image_bytes: bytes | None) -> bool:
+    """A text-only creative needs words, not just whitespace or punctuation."""
+    if image_bytes is not None:
+        return True
+    words = re.findall(r"[^\W_]+", ad_copy, re.UNICODE)
+    cta_only = {"shop", "now", "learn", "more", "discover", "explore", "buy"}
+    return (len(words) >= 2 and any(any(char.isalpha() for char in word) for word in words)
+            and any(word.casefold() not in cta_only for word in words))
+
+
 def _report(findings: list[ScorerFinding], observed_text: str, readability: str) -> ScorerReport:
     decision = decide_review([Finding(
         rule_id=item.rule_id, title=item.flagged_element or item.rule_id,
@@ -340,8 +350,8 @@ def score_creative(
     model: str = "gpt-5-mini",
 ) -> ScorerReport:
     """Review final pixels plus any pasted copy; never delegate verdict to the model."""
-    if not ad_copy.strip() and image_bytes is None:
-        return _fallback("No creative image or ad copy was provided.")
+    if not has_meaningful_creative(ad_copy, image_bytes):
+        return _fallback("There is no creative left to review. Add or revise the ad before continuing.")
     rulebook = load_rulebook()
     rules = {rule["id"]: rule for rule in rulebook["rules"]}
     context = context or ReviewContext()

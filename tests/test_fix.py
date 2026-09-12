@@ -7,6 +7,7 @@ from PIL import Image
 
 from minimalist_mvp.fix import (
     FixUnavailable, creative_copy, generated_draft_with_fix, replace_flagged,
+    propose_external_revision, propose_generated_revision,
     revise_external, revise_generated, suggest_replacement,
 )
 from minimalist_mvp.generation import GeneratedCreative, build_generation_allowlist
@@ -16,14 +17,19 @@ from tests.test_generation import assessment, valid_draft
 
 
 class ReviewResponses:
-    def __init__(self, replacement=""):
+    def __init__(self, replacement="", proposal=""):
         self.replacement = replacement
+        self.proposal = proposal
         self.review_calls = []
+        self.proposal_calls = []
 
     def create(self, **kwargs):
         schema_name = kwargs["text"]["format"]["name"]
         if schema_name == "minimalist_copy_fix":
             return SimpleNamespace(output_text=json.dumps({"replacement": self.replacement}))
+        if schema_name == "minimalist_full_copy_revision":
+            self.proposal_calls.append(kwargs)
+            return SimpleNamespace(output_text=json.dumps({"revised_copy": self.proposal}))
         payload = json.loads(kwargs["input"][1]["content"][0]["text"])
         copy = payload["ad_copy"]
         self.review_calls.append((copy, kwargs["input"][1]["content"]))
@@ -36,6 +42,16 @@ class ReviewResponses:
             issues.append({"rule_id": "CLAIM-005", "basis": "MISSING_CONTEXT",
                            "flagged_element": "proven", "reason": "Missing study",
                            "evidence_ids": [], "suggested_fix": "Provide study or remove claim"})
+        if "Guaranteed blackhead-free skin in 7 days" in copy:
+            issues.extend([
+                {"rule_id": "CLAIM-004", "basis": "KNOWN_VIOLATION",
+                 "flagged_element": "Guaranteed blackhead-free skin in 7 days",
+                 "reason": "Unsupported guarantee", "evidence_ids": [],
+                 "suggested_fix": "Remove the guarantee"},
+                {"rule_id": "CLAIM-006", "basis": "MISSING_CONTEXT",
+                 "flagged_element": "in 7 days", "reason": "Missing study",
+                 "evidence_ids": [], "suggested_fix": "Provide substantiation or remove"},
+            ])
         return SimpleNamespace(output_text=json.dumps({"observed_text": copy,
             "image_readability": "READABLE" if len(kwargs["input"][1]["content"]) > 1 else "NO_IMAGE",
             "issues": issues}))
@@ -144,6 +160,52 @@ class FixTests(unittest.TestCase):
         self.responses.replacement = "₹499 today only"
         with self.assertRaises(FixUnavailable):
             suggest_replacement(self.client, finding("bad"), "A bad claim", external_context)
+
+    def test_multi_finding_proposal_keeps_supported_line_once(self):
+        current = "Guaranteed blackhead-free skin in 7 days.\nPowered by 2% Salicylic Acid."
+        self.responses.proposal = "Powered by 2% Salicylic Acid."
+        report = revise_external(self.client, current, None, self.context)
+        self.assertEqual(report.overall, OverallStatus.BLOCK)
+        revised = propose_external_revision(self.client, current, report.findings, self.context)
+        self.assertEqual(revised, "Powered by 2% Salicylic Acid.")
+        self.assertEqual(len(self.responses.proposal_calls), 1)
+        payload = json.loads(self.responses.proposal_calls[0]["input"][1]["content"])
+        self.assertGreaterEqual(len(payload["all_unresolved_findings"]), 2)
+        final = revise_external(self.client, revised, None, self.context)
+        self.assertTrue(final.export_allowed)
+
+    def test_proposal_cannot_be_empty_or_add_invented_words(self):
+        current = "Guaranteed blackhead-free skin in 7 days.\nPowered by 2% Salicylic Acid."
+        report = revise_external(self.client, current, None, self.context)
+        self.responses.proposal = "."
+        with self.assertRaises(FixUnavailable):
+            propose_external_revision(self.client, current, report.findings, self.context)
+        self.responses.proposal = "Miracle results with 2% Salicylic Acid."
+        with self.assertRaises(FixUnavailable):
+            propose_external_revision(self.client, current, report.findings, self.context)
+
+    def test_generated_coherent_proposal_preserves_unaffected_fields(self):
+        bad = valid_draft().model_copy(deep=True)
+        bad.supporting_copy.text = "Guaranteed to cure acne"
+        creative = GeneratedCreative(draft=bad, evidence=build_generation_allowlist(assessment()),
+                                    product_image_reference="fixture.png", model="test")
+        report = revise_external(self.client, creative_copy(bad), None, self.context)
+        responses = SimpleNamespace(
+            parse=lambda **kwargs: SimpleNamespace(output_parsed=valid_draft()),
+        )
+        proposal = propose_generated_revision(SimpleNamespace(responses=responses),
+                                             creative, report.findings)
+        self.assertEqual(proposal.headline, bad.headline)
+        self.assertEqual(proposal.ingredient_callout, bad.ingredient_callout)
+        self.assertEqual(proposal.supporting_copy.text, valid_draft().supporting_copy.text)
+
+    def test_blank_and_punctuation_only_never_pass_or_call_model(self):
+        for copy in ("", "  \n ", ".", "...!?", "  - / . "):
+            report = revise_external(self.client, copy, None, self.context)
+            self.assertEqual(report.overall, OverallStatus.REVIEW)
+            self.assertFalse(report.export_allowed)
+            self.assertIn("no creative left", report.findings[0].reason)
+        self.assertEqual(self.responses.review_calls, [])
 
 
 if __name__ == "__main__":
