@@ -1,0 +1,316 @@
+{
+  "metadata": {
+    "name": "Minimalist Scorer Golden Evals",
+    "version": "1.0",
+    "market": "India",
+    "scope": "Hypothetical Minimalist static Meta Feed creative pre-flight review",
+    "rulebook_path": "rules/minimalist-brand-rules-v1.json",
+    "created_before_scorer_implementation_and_tuning": true,
+    "purpose": "Human-authored expected behavior to check scorer regressions, especially that known BLOCK cases never PASS.",
+    "synthetic_fixture_notice": "Demo Serum, its product details, study, and ad examples are hypothetical test material, not claims about a real Minimalist product or approved ad copy.",
+    "finding_statuses": ["BLOCK", "WARN", "NOT_ASSESSABLE"],
+    "overall_results": ["PASS", "PASS_WITH_WARNINGS", "REVIEW", "BLOCK"],
+    "finding_expectation": "Expected findings list the important rule-level findings to check; an empty list means no finding is expected. NOT_ASSESSABLE is never an overall result.",
+    "visual_description_limit": "Cases 10 and 20 describe visual inputs but do not yet have image files. Cases 21-26 reference the six reviewed PNG fixtures."
+  },
+  "evidence_fixtures": {
+    "P": {
+      "kind": "hypothetical_verified_product_record",
+      "product": "Minimalist Demo Serum",
+      "market": "India",
+      "selected_variant": "30 mL",
+      "selected_pack": "Synthetic Demo Serum pack labelled 30 mL and 2% Salicylic Acid",
+      "source_wording": [
+        "2% Salicylic Acid",
+        "suitable for oily skin",
+        "helps reduce the appearance of blackheads"
+      ],
+      "claim_support": "For this test fixture only, evidence supports the exact qualified blackheads wording above; no stronger result is supported.",
+      "complete_generation_allowlist": [
+        "Minimalist Demo Serum",
+        "30 mL",
+        "2% Salicylic Acid",
+        "suitable for oily skin",
+        "helps reduce the appearance of blackheads"
+      ],
+      "provenance_assumption": "The listed product facts and wording have traceable source wording, capture time, and selected-variant context in this hypothetical fixture."
+    },
+    "S": {
+      "kind": "hypothetical_consumer_study",
+      "product": "Minimalist Demo Serum",
+      "exact_result": "60% of 50 participants reported smoother-feeling skin after 4 weeks",
+      "measured_outcome": "Participants' self-reported smoother-feeling skin",
+      "population": "50 participants",
+      "duration": "4 weeks",
+      "provenance_assumption": "The full hypothetical study result and its source details are available where a case cites S."
+    }
+  },
+  "cases": [
+    {
+      "case_id": "CASE-01",
+      "input_type": "text",
+      "ad_input": "Minimalist Demo Serum · 2% Salicylic Acid",
+      "evidence_context": {"fixture_refs": ["P"]},
+      "expected_overall": "PASS",
+      "expected_exportable": true,
+      "expected_findings": [],
+      "reason": "Exact sourced product fact."
+    },
+    {
+      "case_id": "CASE-02",
+      "input_type": "text",
+      "ad_input": "Helps reduce the appearance of blackheads. Shop now.",
+      "evidence_context": {"fixture_refs": ["P"], "note": "P includes support for this exact wording."},
+      "expected_overall": "PASS",
+      "expected_exportable": true,
+      "expected_findings": [],
+      "reason": "The wording is supported and a purchase CTA is allowed; TONE-004 does not create a finding."
+    },
+    {
+      "case_id": "CASE-03",
+      "input_type": "text",
+      "ad_input": "Minimalist Demo Serum — a little skincare magic.",
+      "evidence_context": {"fixture_refs": ["P"]},
+      "expected_overall": "PASS_WITH_WARNINGS",
+      "expected_exportable": true,
+      "expected_findings": [{"rule_id": "TONE-003", "status": "WARN"}],
+      "reason": "Vague, non-measurable beauty hyperbole is a non-gating tone issue."
+    },
+    {
+      "case_id": "CASE-04",
+      "input_type": "text",
+      "ad_input": "Minimalist Demo Serum · With Salicylic Acid",
+      "evidence_context": {"fixture_refs": ["P"], "note": "P specifies 2% Salicylic Acid."},
+      "expected_overall": "PASS_WITH_WARNINGS",
+      "expected_exportable": true,
+      "expected_findings": [{"rule_id": "LANG-002", "status": "WARN"}],
+      "reason": "The ingredient meaning remains correct but useful concentration specificity is lost."
+    },
+    {
+      "case_id": "CASE-05",
+      "input_type": "text",
+      "ad_input": "Clinically proven to reduce blackheads",
+      "evidence_context": {"fixture_refs": ["P"], "note": "A hypothetical product page repeats the ad phrase, but no clinical study or substantiation is supplied."},
+      "expected_overall": "REVIEW",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-005", "status": "NOT_ASSESSABLE"}],
+      "reason": "A page assertion alone does not establish clinical proof; the characterization is not known false."
+    },
+    {
+      "case_id": "CASE-06",
+      "input_type": "text",
+      "ad_input": "60% saw smoother skin",
+      "evidence_context": {"fixture_refs": ["P"], "note": "A hypothetical product page repeats this number, but the underlying study is not supplied; S is unavailable for this case."},
+      "expected_overall": "REVIEW",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-006", "status": "NOT_ASSESSABLE"}],
+      "reason": "The number, measurement basis, and qualifiers cannot be verified."
+    },
+    {
+      "case_id": "CASE-07",
+      "input_type": "text",
+      "ad_input": "India's #1 serum",
+      "evidence_context": {"fixture_refs": ["P"], "note": "No ranking source, comparison basis, or period is supplied."},
+      "expected_overall": "REVIEW",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-007", "status": "NOT_ASSESSABLE"}],
+      "reason": "The superiority claim lacks substantiation but is not known false."
+    },
+    {
+      "case_id": "CASE-08",
+      "input_type": "text",
+      "ad_input": "₹599 today",
+      "evidence_context": {"fixture_refs": ["P"], "note": "A matching page capture showed ₹599 90 days ago; no current price check is available."},
+      "expected_overall": "REVIEW",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "SYSTEM-001", "status": "NOT_ASSESSABLE"}],
+      "reason": "Current validity of a dynamic commercial value cannot be verified."
+    },
+    {
+      "case_id": "CASE-09",
+      "input_type": "text_external",
+      "ad_input": "Minimalist Demo Serum · 2% Salicylic Acid · Fades spots",
+      "evidence_context": {"fixture_refs": [], "note": "External Minimalist India ad; no product record or supporting evidence is supplied."},
+      "expected_overall": "REVIEW",
+      "expected_exportable": false,
+      "expected_findings": [
+        {"rule_id": "CLAIM-001", "status": "NOT_ASSESSABLE"},
+        {"rule_id": "CLAIM-002", "status": "NOT_ASSESSABLE"}
+      ],
+      "reason": "Without product context, neither the ingredient fact nor benefit can be checked; absence of context is not proof of invention."
+    },
+    {
+      "case_id": "CASE-10",
+      "input_type": "visual_description",
+      "ad_input": "A rendered creative shows '60% reported smoother-feeling skin' and fine print too small or blurred to tell whether 'after 4 weeks' is present and legible.",
+      "evidence_context": {"fixture_refs": ["P", "S"], "note": "The material four-week qualifier is required by S; this case has no separate image file yet."},
+      "expected_overall": "REVIEW",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-009", "status": "NOT_ASSESSABLE"}],
+      "reason": "The final visible asset does not let the scorer verify whether the material qualifier is actually present and legible."
+    },
+    {
+      "case_id": "CASE-11",
+      "input_type": "text",
+      "ad_input": "Minimalist Demo Serum · 5% Salicylic Acid",
+      "evidence_context": {"fixture_refs": ["P"], "note": "P says 2% Salicylic Acid."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-001", "status": "BLOCK"}],
+      "reason": "Known wrong concentration."
+    },
+    {
+      "case_id": "CASE-12",
+      "input_type": "text",
+      "ad_input": "Fades dark spots",
+      "evidence_context": {"fixture_refs": ["P"], "note": "P is the complete generation allowlist and contains no dark-spot benefit."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-002", "status": "BLOCK"}],
+      "reason": "Known invented benefit, unlike an external ad with missing product context."
+    },
+    {
+      "case_id": "CASE-13",
+      "input_type": "text",
+      "ad_input": "Removes blackheads",
+      "evidence_context": {"fixture_refs": ["P"], "note": "P supports only 'helps reduce the appearance of blackheads'."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-003", "status": "BLOCK"}],
+      "reason": "The ad materially strengthens the supported wording."
+    },
+    {
+      "case_id": "CASE-14",
+      "input_type": "text",
+      "ad_input": "Guaranteed blackhead-free skin in 7 days",
+      "evidence_context": {"fixture_refs": ["P"], "note": "No evidence for this exact guarantee is available."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-004", "status": "BLOCK"}],
+      "reason": "An exceptional guarantee lacks evidence for the exact promise."
+    },
+    {
+      "case_id": "CASE-15",
+      "input_type": "text",
+      "ad_input": "Cures acne",
+      "evidence_context": {"fixture_refs": ["P"], "note": "P has only a cosmetic benefit and no exact cure evidence."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-008", "status": "BLOCK"}],
+      "reason": "Cure-like promise without evidence for that exact promise."
+    },
+    {
+      "case_id": "CASE-16",
+      "input_type": "text",
+      "ad_input": "60% of participants reported smoother-feeling skin",
+      "evidence_context": {"fixture_refs": ["P", "S"], "note": "S specifies 'after 4 weeks'; the ad visibly omits it."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-009", "status": "BLOCK"}],
+      "reason": "The material timeframe is known to be missing; do not duplicate the finding under LANG-004."
+    },
+    {
+      "case_id": "CASE-17",
+      "input_type": "text",
+      "ad_input": "Clinically proven to reduce blackheads",
+      "evidence_context": {"fixture_refs": ["P"], "note": "The supplied supporting document explicitly says consumer survey, not clinical study."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-005", "status": "BLOCK"}],
+      "reason": "The clinical characterization is known false, unlike the missing study in CASE-05."
+    },
+    {
+      "case_id": "CASE-18",
+      "input_type": "text",
+      "ad_input": "80% of participants reported smoother-feeling skin after 4 weeks",
+      "evidence_context": {"fixture_refs": ["P", "S"], "note": "S reports 60%, not 80%."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-006", "status": "BLOCK"}],
+      "reason": "Known wrong efficacy number."
+    },
+    {
+      "case_id": "CASE-19",
+      "input_type": "text",
+      "ad_input": "You have acne. Try Minimalist Demo Serum.",
+      "evidence_context": {"fixture_refs": ["P"], "note": "Text is fully readable. Acne-related product language itself is not automatically prohibited."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "META-001", "status": "BLOCK"}],
+      "reason": "The copy asserts a personal health or appearance attribute about the viewer."
+    },
+    {
+      "case_id": "CASE-20",
+      "input_type": "visual_description",
+      "ad_input": "A creative circles facial blemishes and labels them 'ugly skin' beside the product.",
+      "evidence_context": {"fixture_refs": ["P"], "note": "The image and words are clearly visible; this case has no separate image file yet."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [
+        {"rule_id": "META-001", "status": "BLOCK"},
+        {"rule_id": "TONE-002", "status": "WARN"}
+      ],
+      "reason": "Appearance shaming triggers a Meta hard gate and a distinct, non-gating brand-tone warning; overall BLOCK wins."
+    },
+    {
+      "case_id": "CASE-21",
+      "input_type": "image",
+      "fixture_path": "evals/fixtures/21-clean-pass.png",
+      "evidence_context": {"fixture_refs": ["P"], "note": "The image uses P's synthetic selected 30 mL pack and only sourced concentration wording plus a CTA."},
+      "expected_overall": "PASS",
+      "expected_exportable": true,
+      "expected_findings": [],
+      "reason": "Clean product representation and sourced copy in a readable square creative."
+    },
+    {
+      "case_id": "CASE-22",
+      "input_type": "image",
+      "fixture_path": "evals/fixtures/22-wrong-concentration.png",
+      "evidence_context": {"fixture_refs": ["P"], "note": "The pack says 2%, while the large embedded overlay says 5%."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-001", "status": "BLOCK"}],
+      "reason": "The wrong concentration appears inside the rendered image."
+    },
+    {
+      "case_id": "CASE-23",
+      "input_type": "image",
+      "fixture_path": "evals/fixtures/23-unreadable-qualifier.png",
+      "evidence_context": {"fixture_refs": ["P", "S"], "note": "S requires the four-week context; the image contains a deliberately blurred fine-print trace that cannot be read reliably."},
+      "expected_overall": "REVIEW",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-009", "status": "NOT_ASSESSABLE"}],
+      "reason": "The scorer cannot verify whether the material qualifier is actually legible or present in the final pixels."
+    },
+    {
+      "case_id": "CASE-24",
+      "input_type": "image",
+      "fixture_path": "evals/fixtures/24-personal-attribute.png",
+      "evidence_context": {"fixture_refs": ["P"], "note": "The embedded image copy says 'You have acne' beside a face and product, without additional shaming language."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "META-001", "status": "BLOCK"}],
+      "reason": "Readable image text asserts an attribute about the viewer."
+    },
+    {
+      "case_id": "CASE-25",
+      "input_type": "image",
+      "fixture_path": "evals/fixtures/25-variant-mismatch.png",
+      "evidence_context": {"fixture_refs": ["P"], "note": "P's selected variant is 30 mL, but the visibly depicted pack is labelled 50 mL."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-001", "status": "BLOCK"}],
+      "reason": "Known product pack/variant mismatch in the rendered creative."
+    },
+    {
+      "case_id": "CASE-26",
+      "input_type": "image",
+      "fixture_path": "evals/fixtures/26-unsupported-image-claim.png",
+      "evidence_context": {"fixture_refs": ["P"], "note": "P is the complete generation allowlist and has no dark-spot benefit; the claim exists only as embedded image text."},
+      "expected_overall": "BLOCK",
+      "expected_exportable": false,
+      "expected_findings": [{"rule_id": "CLAIM-002", "status": "BLOCK"}],
+      "reason": "Unsupported benefit must be detected inside the image, not just in separate ad copy."
+    }
+  ]
+}
