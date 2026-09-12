@@ -226,6 +226,40 @@ class ServerSideSecretTests(unittest.TestCase):
         self.assertTrue(any("Creative being reviewed" in item.value
                             for item in self.app.markdown))
 
+    def test_copy_only_results_keep_all_verdicts_without_creative_export(self) -> None:
+        cases = (
+            ("PASS", None, True),
+            ("PASS_WITH_WARNINGS", "WARN", True),
+            ("REVIEW", "REVIEW", False),
+            ("BLOCK", "BLOCK", False),
+        )
+        self.app.session_state.external_stage = "result"
+        self.app.session_state.external_current_copy = "Test Serum. Shop now."
+        self.app.session_state.external_image_bytes = None
+        self.app.session_state.external_review_context = self.app.session_state.verified_review_context
+        for overall, finding_status, export_allowed in cases:
+            findings = [] if finding_status is None else [{
+                "rule_id": "TONE-003" if finding_status == "WARN" else "CLAIM-001",
+                "area": "Brand Tone" if finding_status == "WARN" else "Policy & Claims",
+                "status": finding_status, "flagged_element": "Test Serum",
+                "reason": "Fixture issue.", "suggested_fix": "Revise the wording.",
+            }]
+            self.app.session_state.external_review = {
+                "overall": overall, "export_allowed": export_allowed,
+                "findings": findings, "image_readability": "NO_IMAGE",
+            }
+            self.app.run(timeout=20)
+            self.assertFalse(self.app.exception, overall)
+            self.assertTrue(any("Copy-only review" in item.value
+                                for item in self.app.markdown), overall)
+            self.assertTrue(any("visual checks were not performed" in item.value
+                                for item in self.app.caption), overall)
+            self.assertFalse(any(widget.label == "Export creative"
+                                 for widget in self.app.download_button), overall)
+            if export_allowed:
+                self.assertTrue(any("Copy review passed" in item.value
+                                    for item in self.app.success), overall)
+
     def test_unavailable_copy_fix_has_direct_evidence_action(self) -> None:
         self.app.session_state.external_stage = "result"
         self.app.session_state.external_current_copy = "Test Serum. Shop now."

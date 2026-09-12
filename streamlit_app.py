@@ -310,13 +310,16 @@ def render_scorer_report(report: ScorerReport, export_data: bytes | None = None,
                          export_name: str = "creative.png", copy_only: bool = False) -> None:
     st.subheader("Pre-flight review")
     label, css_class, gate_message = STATUS_PRESENTATION[report.overall]
+    result_type = "Copy-only review" if copy_only else "Pre-flight result"
     if copy_only and report.export_allowed:
-        gate_message = "Copy checks are clear within the available evidence. Visual checks were not performed."
+        gate_message = "Copy checks are clear within the available evidence."
     st.markdown(
-        f'<div class="status-card {css_class}"><div class="eyebrow">Pre-flight result</div>'
+        f'<div class="status-card {css_class}"><div class="eyebrow">{result_type}</div>'
         f'<div class="status-label">{label}</div><div>{gate_message}</div></div>',
         unsafe_allow_html=True,
     )
+    if copy_only:
+        st.caption("No image was supplied, so visual checks were not performed.")
     st.caption("Pre-flight within available evidence—not legal approval or guaranteed Meta approval.")
     columns = st.columns(3)
     for column, area in zip(columns, ("Policy & Claims", "Brand Tone", "Brand Language")):
@@ -335,7 +338,8 @@ def render_scorer_report(report: ScorerReport, export_data: bytes | None = None,
                         for source in finding.evidence:
                             st.caption(source)
     if report.export_allowed and copy_only:
-        st.info("Copy-only review. Add the finished ad image for visual review before exporting a creative.")
+        st.success("Copy review passed with warnings."
+                   if report.overall == OverallStatus.PASS_WITH_WARNINGS else "Copy review passed.")
     elif report.export_allowed:
         st.success("Export allowed for this pre-flight result.")
         if export_data is not None:
