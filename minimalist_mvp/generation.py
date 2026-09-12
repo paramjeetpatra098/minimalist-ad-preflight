@@ -31,6 +31,10 @@ class UnsupportedWordingError(GenerationUnavailable):
     """The model supplied words outside the cited evidence and neutral vocabulary."""
 
 
+class AudienceAlignmentError(GenerationUnavailable):
+    """The draft ignored relevant, eligible evidence for the supplied audience."""
+
+
 class CitedAdElement(BaseModel):
     text: str = Field(min_length=1)
     evidence_ids: list[str]
@@ -83,6 +87,21 @@ class GenerationContext:
     audience: str = ""
 
 
+_OBJECTIVE_CTA = {
+    "": "Explore",
+    "awareness": "Discover more",
+    "consideration": "Learn more",
+    "conversion": "Shop now",
+}
+
+
+def objective_cta(objective: str) -> str:
+    try:
+        return _OBJECTIVE_CTA[objective.strip().casefold()]
+    except KeyError as exc:
+        raise GenerationUnavailable("Choose a supported campaign objective.") from exc
+
+
 def build_generation_allowlist(assessment: EligibilityAssessment) -> list[EvidenceEntry]:
     allowed_statuses = {
         EligibilityStatus.ELIGIBLE,
@@ -120,6 +139,56 @@ def ensure_generation_is_useful(evidence: list[EvidenceEntry]) -> None:
         )
 
 
+def audience_relevance(evidence: list[EvidenceEntry], audience: str) -> tuple[set[str], list[str]]:
+    """Find source-backed product wording that overlaps the marketer's audience context."""
+    terms = {
+        _audience_token(token)
+        for token in _meaningful_tokens(audience) - _GENERIC_CREATIVE_TOKENS - _AUDIENCE_CONTEXT_WORDS
+    }
+    matches = [
+        entry.evidence_id
+        for entry in evidence
+        if entry.category not in {"Product identity", "Evidence / qualifier"}
+        and terms & {
+            _audience_token(token)
+            for token in _meaningful_tokens(f"{entry.label} {entry.exact_text}")
+        }
+    ]
+    return terms, matches
+
+
+def validate_audience_alignment(
+    draft: AdDraft, terms: set[str], relevant_ids: list[str], evidence: list[EvidenceEntry],
+) -> None:
+    if not relevant_ids:
+        return
+    by_id = {entry.evidence_id: entry for entry in evidence}
+    for element in (draft.headline, draft.supporting_copy):
+        visible_words = {_audience_token(token) for token in _meaningful_tokens(element.text)}
+        for evidence_id in set(element.evidence_ids).intersection(relevant_ids):
+            entry = by_id[evidence_id]
+            sourced_words = {
+                _audience_token(token)
+                for token in _meaningful_tokens(f"{entry.label} {entry.exact_text}")
+            }
+            if terms & visible_words & sourced_words:
+                return
+    raise AudienceAlignmentError("The draft did not use eligible evidence relevant to the audience.")
+
+
+def _audience_token(token: str) -> str:
+    """Match simple word forms for relevance only; visible copy still uses exact evidence."""
+    if token in _SUN_PROTECTION_TERMS:
+        return "sun_protection"
+    if len(token) > 5 and token.endswith("ness"):
+        token = token[:-4]
+    if len(token) > 4 and token.endswith("y"):
+        token = token[:-1]
+    if len(token) > 4 and token.endswith("s"):
+        token = token[:-1]
+    return token
+
+
 def generate_ad_content(
     client: Any,
     assessment: EligibilityAssessment,
@@ -130,11 +199,15 @@ def generate_ad_content(
     evidence = build_generation_allowlist(assessment)
     ensure_generation_is_useful(evidence)
     context = context or GenerationContext()
+    required_cta = objective_cta(context.objective)
+    audience_terms, audience_evidence_ids = audience_relevance(evidence, context.audience)
 
     payload = {
         "format": "one 1080x1080 Meta Feed creative",
         "campaign_objective": context.objective.strip() or "Present the product clearly",
+        "required_cta": required_cta,
         "audience_context": context.audience.strip() or "General India skincare audience",
+        "audience_relevant_evidence_ids": audience_evidence_ids,
         "permitted_neutral_connector_words": sorted(_GENERIC_CREATIVE_TOKENS),
         "allowed_evidence": [
             {
@@ -156,14 +229,23 @@ def generate_ad_content(
         "numbers, timeframes, and qualifiers exactly. Every headline, supporting-copy, or callout "
         "fact must cite the evidence IDs it uses. For ELIGIBLE_REVIEW_REQUIRED evidence, include "
         "every required condition verbatim in the visible copy. Use a neutral CTA such as Shop now, "
-        "Learn more, Discover more, or Explore. CTA evidence_ids must be empty. If a concise "
+        "Learn more, Discover more, or Explore. Use required_cta exactly; CTA evidence_ids must "
+        "be empty. For Awareness, lead with clear product identity and broadly relevant sourced "
+        "benefits; for Consideration, emphasize sourced ingredients, specifications or usage; "
+        "for Conversion, keep the supported benefit concise. Never invent a claim to fit the "
+        "objective. If a concise "
         "ingredient or concentration exists, use it for ingredient_callout; otherwise return null. "
         "Outside exact evidence wording, use only the permitted neutral connector words. "
         "Use complete words from the evidence, never clipped, split, misspelled, or invented "
         "fragments. If a sourced phrase will not fit, choose a shorter complete sourced phrase; "
         "do not shorten individual words. Keep the "
-        "headline to 80 characters, supporting copy to 200, and callout to 70. Audience and "
-        "objective are creative context only and may not become product facts."
+        "headline to 80 characters, supporting copy to 200, and callout to 70. If an audience "
+        "is supplied and audience_relevant_evidence_ids is nonempty, use at least one of those "
+        "evidence items in the visible headline or supporting copy, with its ID cited. Prioritize "
+        "the relevant sourced wording over unrelated facts. Never repeat audience assumptions "
+        "as product claims or imply that the viewer has a personal condition. If no relevant "
+        "eligible evidence exists, keep the copy general; do not invent a tailored claim. "
+        "Objective may guide emphasis but may not become a product fact."
     )
 
     retry_instruction = (
@@ -171,13 +253,14 @@ def generate_ad_content(
         "draft from the allowed evidence; do not reuse or edit the failed draft. Use only intact "
         "source words and the permitted neutral connector words."
     )
+    retry_note = retry_instruction
     for attempt in range(2):
         response = client.responses.parse(
             model=model,
             input=[
                 {
                     "role": "developer",
-                    "content": instructions + (" " + retry_instruction if attempt else ""),
+                    "content": instructions + (" " + retry_note if attempt else ""),
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
@@ -190,6 +273,19 @@ def generate_ad_content(
             raise GenerationUnavailable(UNRELIABLE_CREATIVE_MESSAGE)
         try:
             validate_ad_draft(draft, evidence)
+            validate_audience_alignment(draft, audience_terms, audience_evidence_ids, evidence)
+        except AudienceAlignmentError:
+            if attempt == 0:
+                retry_note = (
+                    "The previous draft did not use audience-relevant eligible evidence. "
+                    "Use one of audience_relevant_evidence_ids in headline or supporting copy, "
+                    "with its sourced audience-relevant wording visible and its ID cited."
+                )
+                continue
+            raise GenerationUnavailable(
+                "Couldn’t create audience-relevant copy from the available evidence. "
+                "Try a different audience context."
+            ) from None
         except UnsupportedWordingError:
             if attempt == 0:
                 continue
@@ -198,6 +294,11 @@ def generate_ad_content(
             if attempt == 1:
                 raise GenerationUnavailable(UNRELIABLE_CREATIVE_MESSAGE) from None
             raise
+        # The raw draft has already passed all evidence and CTA checks. Normalize only
+        # this neutral, claim-free CTA so the selected objective visibly affects the ad.
+        if draft.cta.text != required_cta:
+            draft = draft.model_copy(deep=True)
+            draft.cta = CtaElement(text=required_cta, evidence_ids=[])
         return GeneratedCreative(
             draft=draft,
             evidence=evidence,
@@ -396,8 +497,6 @@ def render_creative_preview(creative: GeneratedCreative, product_image: bytes) -
     cta_width = max(190, draw.textbbox((0, 0), cta_text, font=cta_font)[2] + 64)
     draw.rounded_rectangle((72, 918, 72 + cta_width, 986), 10, fill="#111111")
     draw.text((104, 935), cta_text, fill="#ffffff", font=cta_font)
-    draw.text((72, 1018), "1080 × 1080 Meta Feed creative preview", fill="#6b6b6b", font=label_font)
-
     output = BytesIO()
     canvas.save(output, format="PNG", optimize=True)
     return output.getvalue()
@@ -465,4 +564,14 @@ _GENERIC_CREATIVE_TOKENS = {
     "care", "clear", "daily", "discover", "designed", "explore", "formula",
     "minimalist", "now", "product", "routine", "serum", "shop", "simple",
     "skin", "skincare", "support", "targeted", "your",
+}
+
+_AUDIENCE_CONTEXT_WORDS = {
+    "audience", "customers", "customer", "people", "person", "users", "user",
+    "looking", "interested", "concerned", "wants", "want", "who", "their",
+}
+
+_SUN_PROTECTION_TERMS = {
+    "sun", "sunlight", "sunshine", "sunscreen", "spf", "uv", "uva", "uvb",
+    "outdoor", "outdoors",
 }

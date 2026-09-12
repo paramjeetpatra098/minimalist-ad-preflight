@@ -100,6 +100,9 @@ STATUS_PRESENTATION = {
     ),
 }
 
+# Bump when rendered pixels change so a saved preview and its review cannot outlive the renderer.
+CREATIVE_RENDER_VERSION = 2
+
 
 def finding_label(outcome: FindingOutcome) -> str:
     return {
@@ -421,6 +424,7 @@ def render_generated_fix_loop(creative: GeneratedCreative, report: ScorerReport)
         else:
             st.session_state.generated_creative = updated.model_dump(mode="json")
             st.session_state.generated_preview = preview
+            st.session_state.generated_render_version = CREATIVE_RENDER_VERSION
             st.session_state.generated_review = new_report.model_dump(mode="json")
             st.session_state.generated_revision_proposal = None
             st.session_state.generated_revision_source = None
@@ -439,11 +443,16 @@ def render_generation(
         "Campaign objective (optional)",
         ("", "Awareness", "Consideration", "Conversion"),
         format_func=lambda value: value or "Default — present the product clearly",
+        help="Guides which supported details to emphasize and sets the ad's neutral CTA.",
     )
     audience = st.text_area(
         "Audience context (optional)",
         placeholder="For example: people building a simple evening skincare routine",
         max_chars=300,
+        help=(
+            "Helps emphasize relevant, source-backed product wording in the ad. "
+            "It does not change the product photo or create new claims."
+        ),
     )
 
     api_key = configured_openai_api_key()
@@ -451,6 +460,12 @@ def render_generation(
         st.error("OpenAI API key is not configured on the server.")
 
     signature = generation_signature(assessment, image_reference, objective, audience)
+    if (st.session_state.get("generated_preview")
+            and st.session_state.get("generated_render_version") != CREATIVE_RENDER_VERSION):
+        st.session_state.generated_creative = None
+        st.session_state.generated_preview = None
+        st.session_state.generated_review = None
+        st.info("The creative preview was updated. Generate again to review the current version.")
     if st.button("Generate one creative", type="primary", disabled=not bool(api_key)):
         api_stage = "generation"
         try:
@@ -484,6 +499,7 @@ def render_generation(
         else:
             st.session_state.generated_creative = creative.model_dump(mode="json")
             st.session_state.generated_preview = preview
+            st.session_state.generated_render_version = CREATIVE_RENDER_VERSION
             st.session_state.generated_review = report.model_dump(mode="json")
             st.session_state.generated_revision_proposal = None
             st.session_state.generated_revision_source = None
@@ -516,14 +532,31 @@ def render_extraction(
         st.warning(warning)
 
     st.subheader("Confirm this product")
-    identity_left, identity_right = st.columns([1.35, 1])
+    st.markdown(f"### {extraction.product_name}")
+    confirmation_key = f"confirmed-product-{extraction.captured_at.isoformat()}"
+    confirmation = st.session_state.get(confirmation_key)
+    if confirmation:
+        confirmed_message, edit_action = st.columns([3, 1])
+        with confirmed_message:
+            st.success("Product confirmed", icon="✅")
+        with edit_action:
+            if st.button("Edit product", key=f"edit-product-{extraction.captured_at.isoformat()}"):
+                st.session_state[confirmation_key] = None
+                st.session_state.verified_review_context = None
+                st.rerun()
+
+    identity_left, identity_right = st.columns(2)
 
     selected_variant: ProductVariant | None = None
     selected_image: ProductImage | None = None
     with identity_left:
-        st.markdown(f"### {extraction.product_name}")
-
-        if len(extraction.variants) > 1:
+        if confirmation:
+            selected_variant = next(
+                (variant for variant in extraction.variants if variant.id == confirmation["variant_id"]),
+                None,
+            )
+            st.markdown(f"**Variant / size:** {variant_label(selected_variant) if selected_variant else 'Not available'}")
+        elif len(extraction.variants) > 1:
             initial_variant = next(
                 (
                     variant
@@ -548,13 +581,26 @@ def render_extraction(
                 st.warning("Multiple variants were found. Select one rather than relying on the page default.")
         elif extraction.variants:
             selected_variant = extraction.variants[0]
-            st.markdown(f"**Variant / size:** {variant_label(selected_variant)}")
+            st.selectbox(
+                "Select the exact variant / size",
+                extraction.variants,
+                index=0,
+                format_func=variant_label,
+                disabled=True,
+                key=f"variant-{extraction.captured_at.isoformat()}",
+            )
         else:
-            st.caption("Variant / size was not available on the page.")
+            st.markdown("**Variant / size:** Not available on the page")
 
     with identity_right:
-        if manual_image:
-            st.image(manual_image, caption=extraction.manual_image_name, width="stretch")
+        if confirmation:
+            selected_image = next(
+                (image for image in extraction.images if image.url == confirmation["image_url"]),
+                None,
+            )
+            st.markdown(f"**Product image:** {selected_image.label if selected_image else extraction.manual_image_name or 'Not available'}")
+        elif manual_image:
+            st.markdown(f"**Product image:** {extraction.manual_image_name}")
         elif extraction.images:
             default_image = None
             if selected_variant:
@@ -578,12 +624,15 @@ def render_extraction(
                 format_func=image_label,
                 key=f"image-{extraction.captured_at.isoformat()}",
             )
-            if selected_image:
-                st.image(selected_image.url, caption=selected_image.label, width="stretch")
-            else:
+            if not selected_image:
                 st.info("Choose the exact product image rather than letting the system guess.")
         else:
             st.warning("No product image is available for verification.")
+
+        if manual_image:
+            st.image(manual_image, caption=extraction.manual_image_name, width="stretch")
+        elif selected_image:
+            st.image(selected_image.url, caption=selected_image.label, width="stretch")
 
     commercial_items = list(extraction.commercial)
     if selected_variant:
@@ -628,13 +677,19 @@ def render_extraction(
 
     identity_ready = bool(extraction.product_name) and bool(manual_image or selected_image)
     variant_ready = len(extraction.variants) <= 1 or selected_variant is not None
-    verified = st.checkbox(
-        "I confirm this is the right product, variant and image, and I have checked the summary.",
+    if not confirmation and st.button(
+        "Confirm product",
+        type="primary",
         disabled=not (identity_ready and variant_ready),
-        key=f"verified-{extraction.captured_at.isoformat()}",
-    )
-    if verified:
-        st.success("Product confirmed. You can create the ad below.", icon="✅")
+        key=f"confirm-product-{extraction.captured_at.isoformat()}",
+    ):
+        confirmation = {
+            "variant_id": selected_variant.id if selected_variant else None,
+            "image_url": selected_image.url if selected_image else None,
+        }
+        st.session_state[confirmation_key] = confirmation
+        st.rerun()
+    if confirmation:
         assessment = assess_generation_eligibility(extraction, selected_variant)
         render_eligibility(assessment)
         image_reference = (
@@ -707,7 +762,7 @@ def render_product_flow() -> None:
     if st.session_state.get("product_extraction"):
         current = "Confirm"
         extraction = st.session_state.product_extraction
-        if st.session_state.get(f"verified-{extraction.captured_at.isoformat()}"):
+        if st.session_state.get(f"confirmed-product-{extraction.captured_at.isoformat()}"):
             current = "Generate"
     stored_report = st.session_state.get("generated_review")
     if stored_report:
@@ -1191,8 +1246,3 @@ with external_tab:
 
 with st.expander("See sample review outcomes (demo)", expanded=False):
     render_review_demo()
-
-st.divider()
-st.caption(
-    "Scope: one 1080×1080 Meta Feed creative · Minimalist India · no publishing, accounts, or history"
-)

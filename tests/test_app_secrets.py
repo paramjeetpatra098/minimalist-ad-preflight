@@ -47,12 +47,26 @@ class ServerSideSecretTests(unittest.TestCase):
         self.app.session_state.manual_product_image = image.getvalue()
         self.app.run(timeout=20)
         self.assertFalse(self.app.exception)
-        next(
-            widget
-            for widget in self.app.checkbox
-            if widget.label.startswith("I confirm this is the right product")
-        ).check().run(timeout=20)
+        next(widget for widget in self.app.button
+             if widget.label == "Confirm product").click().run(timeout=20)
         self.assertFalse(self.app.exception)
+
+    def test_product_confirmation_requires_explicit_action_and_edit_reconfirmation(self) -> None:
+        self.app.secrets["OPENAI_API_KEY"] = "unit-test-server-key"
+        self.app.run(timeout=20)
+        self.assertTrue(any(widget.label == "Edit product" for widget in self.app.button))
+        self.assertFalse(any(widget.label == "Confirm product" for widget in self.app.button))
+        next(widget for widget in self.app.button
+             if widget.label == "Edit product").click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertTrue(any(widget.label == "Confirm product" for widget in self.app.button))
+        self.assertFalse(any(widget.label == "Generate one creative" for widget in self.app.button))
+        self.assertIsNone(self.app.session_state.verified_review_context)
+        next(widget for widget in self.app.button
+             if widget.label == "Confirm product").click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertTrue(any(widget.label == "Generate one creative" for widget in self.app.button))
+        self.assertTrue(any("Product confirmed" in item.value for item in self.app.success))
 
     def test_two_marketer_paths_and_collapsed_product_details(self) -> None:
         self.assertEqual([tab.label for tab in self.app.tabs],
@@ -132,6 +146,72 @@ class ServerSideSecretTests(unittest.TestCase):
         self.assertTrue(any("Policy & Claims — PASS" in item.value for item in self.app.subheader))
         self.assertTrue(any("Brand Tone — PASS" in item.value for item in self.app.subheader))
         self.assertTrue(any("Brand Language — PASS" in item.value for item in self.app.subheader))
+
+    def test_old_rendered_preview_and_review_cannot_remain_exportable(self) -> None:
+        self.app.secrets["OPENAI_API_KEY"] = "unit-test-server-key"
+        with patch("openai.OpenAI", return_value=PassingReviewClient()):
+            self.app.run(timeout=20)
+            next(widget for widget in self.app.button
+                 if widget.label == "Generate one creative").click().run(timeout=20)
+        self.assertEqual(self.app.session_state.generated_review["overall"], "PASS")
+        self.app.session_state.generated_render_version = 1
+        self.app.run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertIsNone(self.app.session_state.generated_preview)
+        self.assertIsNone(self.app.session_state.generated_review)
+        self.assertFalse(any(widget.label == "Export creative"
+                             for widget in self.app.download_button))
+        self.assertTrue(any("Generate again" in item.value for item in self.app.info))
+
+    def test_audience_context_reaches_generation_and_invalidates_old_preview(self) -> None:
+        self.app.secrets["OPENAI_API_KEY"] = "unit-test-server-key"
+        client = PassingReviewClient()
+        with patch("openai.OpenAI", return_value=client):
+            next(widget for widget in self.app.text_area
+                 if widget.label == "Audience context (optional)").input(
+                     "People with oily skin"
+                 ).run(timeout=20)
+            next(widget for widget in self.app.button
+                 if widget.label == "Generate one creative").click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertIn('"audience_context": "People with oily skin"',
+                      client.responses.kwargs["input"][1]["content"])
+        self.assertTrue(self.app.session_state.generated_preview)
+        next(widget for widget in self.app.text_area
+             if widget.label == "Audience context (optional)").input(
+                 "People working in the sun"
+             ).run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertTrue(any("The inputs changed" in item.value for item in self.app.info))
+        self.assertFalse(any(widget.label == "Export creative"
+                             for widget in self.app.download_button))
+
+    def test_campaign_objective_changes_generated_cta_and_invalidates_old_preview(self) -> None:
+        self.app.secrets["OPENAI_API_KEY"] = "unit-test-server-key"
+        client = PassingReviewClient()
+        with patch("openai.OpenAI", return_value=client):
+            next(widget for widget in self.app.selectbox
+                 if widget.label == "Campaign objective (optional)").set_value(
+                     "Awareness"
+                 ).run(timeout=20)
+            next(widget for widget in self.app.button
+                 if widget.label == "Generate one creative").click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.app.session_state.generated_creative["draft"]["cta"]["text"],
+                         "Discover more")
+        self.assertIn('"required_cta": "Discover more"',
+                      client.responses.kwargs["input"][1]["content"])
+        next(widget for widget in self.app.selectbox
+             if widget.label == "Campaign objective (optional)").set_value(
+                 "Conversion"
+             ).run(timeout=20)
+        self.assertTrue(any("The inputs changed" in item.value for item in self.app.info))
+        with patch("openai.OpenAI", return_value=PassingReviewClient()):
+            next(widget for widget in self.app.button
+                 if widget.label == "Generate one creative").click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.app.session_state.generated_creative["draft"]["cta"]["text"],
+                         "Shop now")
 
     def test_external_copy_without_context_is_reviewed_and_export_locked(self) -> None:
         self.app.secrets["OPENAI_API_KEY"] = "unit-test-server-key"

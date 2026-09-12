@@ -13,6 +13,7 @@ from minimalist_mvp.eligibility import (
 from minimalist_mvp.generation import (
     AdDraft,
     CtaElement,
+    GenerationContext,
     GenerationUnavailable,
     HeadlineElement,
     IngredientCalloutElement,
@@ -109,6 +110,101 @@ class GenerationTests(unittest.TestCase):
         self.assertNotIn("Guaranteed to cure acne", prompt)
         self.assertEqual(result.product_image_evidence_id, "IMG-001")
 
+    def test_audience_context_prioritizes_relevant_sourced_copy_in_rendered_ad(self) -> None:
+        sunscreen = EligibilityAssessment(decisions=[
+            decision("Test Sunscreen", "Product identity"),
+            decision("SPF 50 provides UVA and UVB protection", "Product fact"),
+            decision("Lightweight texture", "Product fact"),
+        ])
+        generic = AdDraft(
+            headline=HeadlineElement(text="Test Sunscreen", evidence_ids=["EV-001"]),
+            supporting_copy=SupportingCopyElement(text="Lightweight texture", evidence_ids=["EV-003"]),
+            ingredient_callout=None,
+            cta=CtaElement(text="Shop now", evidence_ids=[]),
+        )
+        focused = generic.model_copy(deep=True)
+        focused.supporting_copy.text = "SPF 50 provides UVA and UVB protection"
+        focused.supporting_copy.evidence_ids = ["EV-002"]
+        generic_creative = generate_ad_content(FakeClient(generic), sunscreen, "product.png")
+        client = FakeClient([generic, focused])
+
+        focused_creative = generate_ad_content(
+            client, sunscreen, "product.png",
+            GenerationContext(audience="People working in the sun"),
+        )
+
+        self.assertEqual(client.responses.calls, 2)
+        self.assertEqual(focused_creative.draft.supporting_copy.evidence_ids, ["EV-002"])
+        self.assertNotIn("working", focused_creative.draft.supporting_copy.text.casefold())
+        prompt = client.responses.kwargs["input"][1]["content"]
+        self.assertIn('"audience_relevant_evidence_ids": ["EV-002"]', prompt)
+        image = BytesIO()
+        Image.new("RGB", (300, 600), "#ffffff").save(image, "PNG")
+        self.assertNotEqual(
+            render_creative_preview(generic_creative, image.getvalue()),
+            render_creative_preview(focused_creative, image.getvalue()),
+        )
+
+    def test_audience_context_does_not_force_unsourced_tailoring(self) -> None:
+        client = FakeClient(valid_draft())
+        result = generate_ad_content(
+            client, assessment(), "product.png",
+            GenerationContext(audience="Night-shift workers"),
+        )
+        self.assertEqual(client.responses.calls, 1)
+        self.assertEqual(result.draft.supporting_copy.text, valid_draft().supporting_copy.text)
+
+    def test_audience_relevance_cannot_be_silently_ignored_twice(self) -> None:
+        sunscreen = EligibilityAssessment(decisions=[
+            decision("Test Sunscreen", "Product identity"),
+            decision("SPF 50 provides UVA and UVB protection", "Product fact"),
+            decision("Lightweight texture", "Product fact"),
+        ])
+        generic = AdDraft(
+            headline=HeadlineElement(text="Test Sunscreen", evidence_ids=["EV-001"]),
+            supporting_copy=SupportingCopyElement(text="Lightweight texture", evidence_ids=["EV-003"]),
+            ingredient_callout=None,
+            cta=CtaElement(text="Shop now", evidence_ids=[]),
+        )
+        client = FakeClient(generic)
+        with self.assertRaisesRegex(GenerationUnavailable, "audience-relevant copy"):
+            generate_ad_content(
+                client, sunscreen, "product.png",
+                GenerationContext(audience="People working in the sun"),
+            )
+        self.assertEqual(client.responses.calls, 2)
+
+    def test_campaign_objective_changes_neutral_cta_and_rendered_pixels(self) -> None:
+        image = BytesIO()
+        Image.new("RGB", (300, 600), "#ffffff").save(image, "PNG")
+        results = {}
+        for objective, expected_cta in (
+            ("", "Explore"),
+            ("Awareness", "Discover more"),
+            ("Consideration", "Learn more"),
+            ("Conversion", "Shop now"),
+        ):
+            client = FakeClient(valid_draft())
+            creative = generate_ad_content(
+                client, assessment(), "product.png",
+                GenerationContext(objective=objective),
+            )
+            self.assertEqual(creative.draft.cta.text, expected_cta)
+            self.assertEqual(creative.draft.cta.evidence_ids, [])
+            self.assertIn(f'"required_cta": "{expected_cta}"',
+                          client.responses.kwargs["input"][1]["content"])
+            results[objective] = render_creative_preview(creative, image.getvalue())
+        self.assertEqual(len(set(results.values())), 4)
+
+    def test_objective_cta_does_not_hide_invalid_model_cta(self) -> None:
+        invalid = valid_draft()
+        invalid.cta.text = "Guaranteed results"
+        with self.assertRaisesRegex(GenerationUnavailable, "neutral allowed options"):
+            generate_ad_content(
+                FakeClient(invalid), assessment(), "product.png",
+                GenerationContext(objective="Awareness"),
+            )
+
     def test_generation_stops_when_only_identity_is_eligible(self) -> None:
         weak = EligibilityAssessment(decisions=[decision("Test Serum", "Product identity")])
         with self.assertRaises(GenerationUnavailable):
@@ -202,6 +298,10 @@ class GenerationTests(unittest.TestCase):
         with Image.open(BytesIO(preview)) as rendered:
             self.assertEqual(rendered.size, (1080, 1080))
             self.assertEqual(rendered.format, "PNG")
+            self.assertEqual(
+                rendered.crop((0, 1000, 1080, 1080)).getcolors(),
+                [(1080 * 80, (243, 241, 236))],
+            )
 
 
 if __name__ == "__main__":
