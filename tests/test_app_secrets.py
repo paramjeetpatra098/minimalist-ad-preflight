@@ -70,6 +70,43 @@ class ServerSideSecretTests(unittest.TestCase):
         self.assertTrue(any(widget.label == "Generate one creative" for widget in self.app.button))
         self.assertTrue(any("Product confirmed" in item.value for item in self.app.success))
 
+    def test_product_page_variant_image_context_and_eligibility_survive_reruns(self) -> None:
+        url = "https://beminimalist.co/products/test-serum"
+
+        class Page:
+            headers = {"content-type": "text/html"}
+            encoding = "utf-8"
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield PRODUCT_HTML.encode("utf-8")
+
+        page = Page()
+        page.url = url
+        next(widget for widget in self.app.text_input
+             if widget.label == "Minimalist product URL").input(url).run(timeout=20)
+        with patch("minimalist_mvp.product.requests.get", return_value=page):
+            next(widget for widget in self.app.button
+                 if widget.label == "Extract product information").click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertIsInstance(self.app.session_state.product_extraction, dict)
+        self.assertIsInstance(self.app.session_state.product_extraction["product_name_source"], dict)
+        next(widget for widget in self.app.selectbox
+             if widget.label == "Select the exact variant / size").select_index(0).run(timeout=20)
+        next(widget for widget in self.app.selectbox
+             if widget.label == "Select the product image").select_index(0).run(timeout=20)
+        next(widget for widget in self.app.button
+             if widget.label == "Confirm product").click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        context = self.app.session_state.verified_review_context
+        self.assertEqual(context["product_name"], "Test Serum 2%")
+        self.assertEqual(context["variant"], "30ml")
+        self.assertIn("test-30.png", context["product_image_reference"])
+        self.assertTrue(any(widget.label == "Generate one creative" for widget in self.app.button))
+        self.assertTrue(any("Ready to use" in item.value for item in self.app.markdown))
+
     def test_two_marketer_paths_and_collapsed_product_details(self) -> None:
         self.assertEqual([tab.label for tab in self.app.tabs],
                          ["Create & Review", "Review Existing Ad"])
@@ -480,7 +517,7 @@ class ServerSideSecretTests(unittest.TestCase):
             next(widget for widget in self.app.button
                  if widget.label == "Read product URL").click().run(timeout=20)
         self.assertFalse(self.app.exception)
-        self.assertEqual(self.app.session_state.external_product_extraction.product_name,
+        self.assertEqual(self.app.session_state.external_product_extraction["product_name"],
                          "Test Serum 2%")
         next(widget for widget in self.app.selectbox
              if widget.label == "Select exact variant / size").select_index(0).run(timeout=20)

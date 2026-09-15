@@ -35,6 +35,7 @@ from minimalist_mvp.product import (
     ProductVariant,
     manual_product_extraction,
     read_product_url,
+    restore_product_extraction,
     variant_commercial_items,
 )
 from minimalist_mvp.review import FindingOutcome, OverallStatus, decide_review
@@ -718,6 +719,16 @@ def render_extraction(
             st.caption("Resolve the product identity choices above before verification.")
 
 
+def session_product_extraction(key: str) -> ProductExtraction | None:
+    stored = st.session_state.get(key)
+    if not stored:
+        return None
+    extraction = restore_product_extraction(stored)
+    if not isinstance(stored, dict):
+        st.session_state[key] = extraction.model_dump(mode="json")
+    return extraction
+
+
 def render_manual_fallback(source_url: str) -> None:
     st.subheader("Enter product information manually")
     st.write(
@@ -754,7 +765,7 @@ def render_manual_fallback(source_url: str) -> None:
         except ProductReadError as exc:
             st.error(str(exc))
         else:
-            st.session_state.product_extraction = extraction
+            st.session_state.product_extraction = extraction.model_dump(mode="json")
             st.session_state.manual_product_image = product_image.getvalue() if product_image else None
             st.session_state.product_read_error = None
             st.session_state.generated_creative = None
@@ -767,9 +778,9 @@ def render_manual_fallback(source_url: str) -> None:
 def render_product_flow() -> None:
     st.markdown("### Create & Review")
     current = "Product"
-    if st.session_state.get("product_extraction"):
+    extraction = session_product_extraction("product_extraction")
+    if extraction:
         current = "Confirm"
-        extraction = st.session_state.product_extraction
         if st.session_state.get(f"confirmed-product-{extraction.captured_at.isoformat()}"):
             current = "Generate"
     stored_report = st.session_state.get("generated_review")
@@ -792,13 +803,13 @@ def render_product_flow() -> None:
         st.session_state.verified_review_context = None
         try:
             with st.spinner("Reading the product page…"):
-                st.session_state.product_extraction = read_product_url(source_url)
+                st.session_state.product_extraction = read_product_url(source_url).model_dump(mode="json")
             st.session_state.product_read_error = None
         except ProductReadError as exc:
             st.session_state.product_read_error = str(exc)
 
     read_error = st.session_state.get("product_read_error")
-    extraction = st.session_state.get("product_extraction")
+    extraction = session_product_extraction("product_extraction")
     if read_error:
         st.error(read_error)
         st.info("Use the manual fallback below. The app will not infer missing information.")
@@ -987,10 +998,10 @@ def render_external_alternate_product() -> tuple[ReviewContext | None, bool]:
             st.session_state.external_product_extraction = None
             st.error(str(exc))
         else:
-            st.session_state.external_product_extraction = extraction
+            st.session_state.external_product_extraction = extraction.model_dump(mode="json")
             st.session_state.external_product_url = product_url
             st.rerun()
-    extraction = st.session_state.get("external_product_extraction")
+    extraction = session_product_extraction("external_product_extraction")
     if not extraction or product_url != st.session_state.get("external_product_url"):
         return None, False
     st.markdown(f"**{extraction.product_name}**")

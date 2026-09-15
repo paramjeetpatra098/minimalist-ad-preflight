@@ -70,6 +70,13 @@ class ProductExtraction(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+def restore_product_extraction(value: ProductExtraction | dict[str, Any]) -> ProductExtraction:
+    """Rebuild current model classes from session data, including pre-update instances."""
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json")
+    return ProductExtraction.model_validate(value)
+
+
 def validate_product_url(raw_url: str) -> str:
     url = raw_url.strip()
     if not url:

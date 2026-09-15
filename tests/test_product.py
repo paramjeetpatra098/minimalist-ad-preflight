@@ -1,9 +1,13 @@
 import unittest
 from datetime import UTC, datetime
 
+from pydantic import ValidationError, create_model
+
+from minimalist_mvp.eligibility import assess_generation_eligibility
 from minimalist_mvp.product import (
     ProductReadError,
     extract_product_html,
+    restore_product_extraction,
     validate_product_url,
     variant_commercial_items,
 )
@@ -105,6 +109,31 @@ class ProductExtractionTests(unittest.TestCase):
         self.assertEqual(self.result.requested_variant_id, "1")
         self.assertEqual([variant.title for variant in self.result.variants], ["30ml", "60ml"])
         self.assertGreaterEqual(len(self.result.images), 2)
+
+    def test_stale_same_named_source_model_is_rebuilt_before_eligibility(self) -> None:
+        legacy_source_model = create_model(
+            "SourceReference",
+            source_url=(str, ...), captured_at=(datetime, ...),
+            section=(str, ...), wording=(str, ...), method=(str, ...),
+        )
+        legacy_source = legacy_source_model.model_validate(
+            self.result.product_name_source.model_dump()
+        )
+        stale_extraction = self.result.model_copy(
+            update={"product_name_source": legacy_source}
+        )
+        with self.assertRaisesRegex(ValidationError, "sources.0"):
+            assess_generation_eligibility(stale_extraction, stale_extraction.variants[0])
+
+        current = restore_product_extraction(stale_extraction)
+        selected_variant = current.variants[0]
+        selected_image = next(image for image in current.images
+                              if image.variant_id == selected_variant.id)
+        assessment = assess_generation_eligibility(current, selected_variant)
+        self.assertEqual(assessment.decisions[0].sources[0].wording,
+                         self.result.product_name_source.wording)
+        self.assertEqual(assessment.decisions[0].sources[0].captured_at, self.captured)
+        self.assertEqual(selected_image.variant_id, selected_variant.id)
 
     def test_extracts_requested_groups_without_inventing(self) -> None:
         self.assertIn("All Ingredients", [item.label for item in self.result.facts])
