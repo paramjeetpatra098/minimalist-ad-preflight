@@ -5,7 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
 from PIL import Image
+from openai import APITimeoutError
 from streamlit.testing.v1 import AppTest
 
 from minimalist_mvp.product import manual_product_extraction
@@ -110,7 +112,11 @@ class ServerSideSecretTests(unittest.TestCase):
             button.click().run(timeout=20)
 
         self.assertFalse(self.app.exception)
-        client.assert_called_once_with(api_key=placeholder_key, timeout=60, max_retries=0)
+        self.assertEqual(client.call_count, 2)
+        self.assertEqual(client.call_args_list[0].kwargs,
+                         {"api_key": placeholder_key, "timeout": 120, "max_retries": 0})
+        self.assertEqual(client.call_args_list[1].kwargs,
+                         {"api_key": placeholder_key, "timeout": 60, "max_retries": 0})
         self.assertEqual(
             self.app.session_state.generated_creative["draft"]["headline"]["text"],
             "Test Serum",
@@ -124,6 +130,28 @@ class ServerSideSecretTests(unittest.TestCase):
         self.assertFalse(
             any(widget.label == "OpenAI API key" for widget in self.app.text_input)
         )
+
+    def test_two_generation_timeouts_show_safe_message_and_do_not_review(self) -> None:
+        self.app.secrets["OPENAI_API_KEY"] = "unit-test-server-key"
+        timeout = APITimeoutError(httpx.Request("POST", "https://api.openai.com/v1/responses"))
+        failing_client = FakeClient([timeout, timeout])
+        with patch("openai.OpenAI", return_value=failing_client) as client_factory, \
+             patch("minimalist_mvp.generation.time.sleep"):
+            self.app.run(timeout=20)
+            next(widget for widget in self.app.button
+                 if widget.label == "Generate one creative").click().run(timeout=20)
+        self.assertFalse(self.app.exception)
+        self.assertEqual(failing_client.responses.calls, 2)
+        client_factory.assert_called_once_with(
+            api_key="unit-test-server-key", timeout=120, max_retries=0,
+        )
+        self.assertTrue(any(
+            error.value == "Generation took longer than expected. Please try again."
+            for error in self.app.error
+        ))
+        self.assertNotIn("generated_preview", self.app.session_state)
+        self.assertFalse(any(widget.label == "Export creative"
+                             for widget in self.app.download_button))
 
     def test_verified_product_through_generation_review_and_export_has_no_exception(self) -> None:
         self.app.secrets["OPENAI_API_KEY"] = "unit-test-server-key"

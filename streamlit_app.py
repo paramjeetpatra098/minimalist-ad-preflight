@@ -4,7 +4,7 @@ import os
 import re
 
 import streamlit as st
-from openai import OpenAI, OpenAIError
+from openai import APIConnectionError, APITimeoutError, OpenAI, OpenAIError
 
 from minimalist_mvp.demo_scenarios import SCENARIOS
 from minimalist_mvp.eligibility import (
@@ -471,7 +471,7 @@ def render_generation(
         try:
             with st.spinner("Creating one evidence-bounded ad…"):
                 product_image = load_product_image(image_reference, manual_image)
-                client = OpenAI(api_key=api_key, timeout=60, max_retries=0)
+                client = OpenAI(api_key=api_key, timeout=120, max_retries=0)
                 creative = generate_ad_content(
                     client,
                     assessment,
@@ -481,8 +481,9 @@ def render_generation(
                 )
                 preview = render_creative_preview(creative, product_image)
                 api_stage = "review"
+                review_client = OpenAI(api_key=api_key, timeout=60, max_retries=0)
                 report = score_creative(
-                    client, ad_copy="\n".join(
+                    review_client, ad_copy="\n".join(
                         element.text for element in (
                             creative.draft.headline, creative.draft.supporting_copy,
                             creative.draft.ingredient_callout, creative.draft.cta,
@@ -493,6 +494,13 @@ def render_generation(
                 )
         except GenerationUnavailable as exc:
             st.error(str(exc))
+        except (APITimeoutError, APIConnectionError) as exc:
+            log_generation_api_error(exc, api_key, api_stage)
+            st.error(
+                "Generation took longer than expected. Please try again."
+                if api_stage == "generation"
+                else "The generation request could not be completed. Check the server configuration and try again."
+            )
         except OpenAIError as exc:
             log_generation_api_error(exc, api_key, api_stage)
             st.error("The generation request could not be completed. Check the server configuration and try again.")

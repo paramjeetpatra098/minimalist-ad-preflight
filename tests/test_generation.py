@@ -2,8 +2,11 @@ import unittest
 from datetime import UTC, datetime
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
+import httpx
 from PIL import Image
+from openai import APIConnectionError, APITimeoutError, RateLimitError
 
 from minimalist_mvp.eligibility import (
     EligibilityAssessment,
@@ -75,7 +78,7 @@ def valid_draft() -> AdDraft:
 
 
 class FakeResponses:
-    def __init__(self, draft: AdDraft | list[AdDraft | None]) -> None:
+    def __init__(self, draft: AdDraft | list[AdDraft | None | Exception]) -> None:
         self.drafts = draft if isinstance(draft, list) else [draft]
         self.kwargs = None
         self.calls = 0
@@ -84,15 +87,60 @@ class FakeResponses:
         self.kwargs = kwargs
         draft = self.drafts[min(self.calls, len(self.drafts) - 1)]
         self.calls += 1
+        if isinstance(draft, Exception):
+            raise draft
         return SimpleNamespace(status="completed", output_parsed=draft)
 
 
 class FakeClient:
-    def __init__(self, draft: AdDraft | list[AdDraft | None]) -> None:
+    def __init__(self, draft: AdDraft | list[AdDraft | None | Exception]) -> None:
         self.responses = FakeResponses(draft)
 
 
 class GenerationTests(unittest.TestCase):
+    def test_one_transient_timeout_retries_same_generation_request(self) -> None:
+        timeout = APITimeoutError(httpx.Request("POST", "https://api.openai.com/v1/responses"))
+        client = FakeClient([timeout, valid_draft()])
+        with patch("minimalist_mvp.generation.time.sleep") as delay:
+            creative = generate_ad_content(client, assessment(), "product.png")
+        self.assertEqual(client.responses.calls, 2)
+        self.assertEqual(creative.draft.headline.text, "Test Serum")
+        delay.assert_called_once_with(1)
+
+    def test_one_transient_network_failure_retries(self) -> None:
+        connection = APIConnectionError(
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses")
+        )
+        client = FakeClient([connection, valid_draft()])
+        with patch("minimalist_mvp.generation.time.sleep"):
+            creative = generate_ad_content(client, assessment(), "product.png")
+        self.assertEqual(client.responses.calls, 2)
+        self.assertEqual(creative.draft.headline.text, "Test Serum")
+
+    def test_second_transient_timeout_stops_without_more_retries(self) -> None:
+        timeout = APITimeoutError(httpx.Request("POST", "https://api.openai.com/v1/responses"))
+        client = FakeClient([timeout, timeout, valid_draft()])
+        with patch("minimalist_mvp.generation.time.sleep"):
+            with self.assertRaises(APITimeoutError):
+                generate_ad_content(client, assessment(), "product.png")
+        self.assertEqual(client.responses.calls, 2)
+
+    def test_nontransient_api_error_does_not_retry(self) -> None:
+        request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        response = httpx.Response(429, request=request)
+        client = FakeClient([RateLimitError("rate limit", response=response, body=None), valid_draft()])
+        with self.assertRaises(RateLimitError):
+            generate_ad_content(client, assessment(), "product.png")
+        self.assertEqual(client.responses.calls, 1)
+
+    def test_unsafe_draft_does_not_trigger_transport_retry(self) -> None:
+        unsafe = valid_draft()
+        unsafe.supporting_copy.text = "99% active helps reduce excess oil"
+        client = FakeClient([unsafe, valid_draft()])
+        with self.assertRaises(GenerationUnavailable):
+            generate_ad_content(client, assessment(), "product.png")
+        self.assertEqual(client.responses.calls, 1)
+
     def test_allowlist_excludes_ineligible_information(self) -> None:
         allowlist = build_generation_allowlist(assessment())
         self.assertEqual([entry.evidence_id for entry in allowlist], ["EV-001", "EV-002"])

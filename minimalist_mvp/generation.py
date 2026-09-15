@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
 import requests
+from openai import APIConnectionError, APITimeoutError
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
@@ -254,18 +257,31 @@ def generate_ad_content(
         "source words and the permitted neutral connector words."
     )
     retry_note = retry_instruction
+    transport_retries_remaining = 1
     for attempt in range(2):
-        response = client.responses.parse(
-            model=model,
-            input=[
-                {
-                    "role": "developer",
-                    "content": instructions + (" " + retry_note if attempt else ""),
-                },
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
-            text_format=AdDraft,
-        )
+        while True:
+            try:
+                response = client.responses.parse(
+                    model=model,
+                    input=[
+                        {
+                            "role": "developer",
+                            "content": instructions + (" " + retry_note if attempt else ""),
+                        },
+                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                    ],
+                    text_format=AdDraft,
+                )
+                break
+            except (APITimeoutError, APIConnectionError) as exc:
+                if not transport_retries_remaining:
+                    raise
+                transport_retries_remaining -= 1
+                logging.getLogger("minimalist_mvp.generation").warning(
+                    "OpenAI generation transport failed: %s; retrying once.",
+                    type(exc).__name__,
+                )
+                time.sleep(1)
         draft = getattr(response, "output_parsed", None)
         if getattr(response, "status", None) == "incomplete" or draft is None:
             if attempt == 0:
